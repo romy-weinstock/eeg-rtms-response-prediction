@@ -39,3 +39,27 @@ The `Responder` label was independently verified against raw BDI-II scores rathe
 
 ### Missingness
 No missingness in the fields used by this project (age, gender, BDI_pre, BDI_post, Responder) for the final 163-subject cohort - confirmed as a byproduct of the checks above. Broader spreadsheet fields (education, NEO-FFI, etc.) are out of scope for this project and were not audited, since they are not planned as model inputs.
+
+## Preprocessing status
+
+Pipeline order (matching authors' `dataset` class methods): `bipolarEOG -> demean -> apply_filters -> correct_EOG`.
+
+Completed and validated on pilot subject:
+- `bipolarEOG`
+- `demean` (added; reordered to precede `apply_filters` per authors' documented order)
+- `apply_filters`
+- `correct_EOG`: VEOG artefact detection and segment padding (regression itself not yet implemented)
+
+Known open items:
+- Three step-like discontinuities in channel F3 (two near samples ~14,000-16,500, one near the recording's end, ~sample 60,000), flagged during `apply_filters` validation, not yet addressed.
+- A VEOG artefact segment (padded: 58705-60500) coincides with the F3 discontinuity near the recording's end; may be a non-ocular artefact rather than a genuine blink, or a filtering/Hilbert-transform edge effect. To be resolved once jump/step-artefact detection is implemented.
+
+Documented deviations from authors' code (library compatibility, no behaviour change):
+- `np.int` -> `int()` (deprecated in current NumPy)
+- `scipy.signal.boxcar` ->`scipy.signal.windows.boxcar` (relocated in current SciPy)
+
+Documented deviations from authors' code (behaviour change, justified):
+- One-sided z-score threshold (`z > threshold`) used in VEOG artefact detection, in place of the authors' two-sided condition, since the input (`boxdata`, an amplitude envelope) is non-negative by construction; the two-sided condition false-flagged ~76% of the recording as artefact due to distribution skew.
+
+Corrected bug (authors' code):
+- Segment-padding first-branch used a hardcoded `Atrl[0,1]` reference instead of `Atrl[i,1]`, incorrectly always referencing the first detected segment regardless of which segment was being padded.

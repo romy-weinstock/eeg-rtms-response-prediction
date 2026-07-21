@@ -2,7 +2,7 @@
 
    Investigating whether pre-treatment EEG connectivity and oscillator-synchrony features can predict rTMS response in MDD, framed as a predictive-enrichment problem for CNS drug development.
 
-   ## Data
+## Data
 
 This project uses the TDBRAIN dataset (van Dijk et al., 2022), provided by the Brainclinics Foundation under a Data Use Agreement. Data is licensed under CC BY 4.0; accompanying preprocessing code is licensed under MIT.
 
@@ -46,14 +46,21 @@ Pipeline order (matching authors' `dataset` class methods): `bipolarEOG -> demea
 
 Completed and validated on pilot subject:
 - `bipolarEOG`
-- `demean` (added; reordered to precede `apply_filters` per authors' documented order)
+- `demean` 
 - `apply_filters`
-- `correct_EOG`: VEOG artefact detection, segment padding, and an amplitude-plausibility guard 
-  (see deviations below) validated. Single-channel, single-segment regression proof-of-concept 
-  (Fp1, one blink segment) implemented and validated: coefficient estimation via unweighted 
-  least-squares (matching authors), tukey-tapered correction weight, subtraction scoped to the 
-  flagged segment only. Generalisation to all EEG channels, all retained segments, and HEOG 
-  not yet implemented.
+- `correct_EOG` (VEOG): artefact detection, segment padding, amplitude-plausibility guard, and
+  a duration-plausibility guard (see deviations below) validated. Gratton regression generalised
+  across all 26 EEG channels and all 6 amplitude- and duration-guarded restEO segments
+  (per-(channel, segment) coefficient estimation via unweighted least-squares, matching authors;
+  tukey-tapered correction weight; subtraction scoped to each flagged segment only). Validated
+  against the single-channel proof-of-concept (exact coefficient match, Fp1) and against expected
+  scalp physiology (mean coefficient by channel shows a monotonic frontal-to-posterior gradient,
+  strongest at Fp1/Fp2, near zero at occipital sites).
+- `correct_EOG` (HEOG): not yet implemented. Detection pipeline will follow the same structure as
+  VEOG (lowpass -> Hilbert envelope -> boxcar smoothing -> threshold -> segment collapse -> padding
+  -> guards), but amplitude and duration thresholds require independent justification rather than
+  reuse of VEOG's values, since saccade amplitude scales with gaze angle (unlike blink amplitude,
+  which is comparatively consistent) and saccades are typically shorter in duration than blinks.
 
 ### restEC artefact segments found to be non-ocular
 
@@ -71,7 +78,7 @@ since eyes-open resting state reliably contains genuine blinks: 8 candidate segm
 detected, of which 7 passed the amplitude guard (peak-to-peak 67.9-576.6 µV) and 1 was 
 excluded (18,162.1 µV, again near the recording's end).
 
-Known open items:
+**Known open items**:
 - Three step-like discontinuities in channel F3 (two near samples ~14,000-16,500, one near the 
   recording's end, ~sample 60,000), flagged during `apply_filters` validation. Confirmed to 
   coincide with the restEC step-artefact segments described above; not yet addressed with a 
@@ -79,10 +86,9 @@ Known open items:
 - Segments near the end of the recording appear artefact-prone in both restEC and restEO for 
   this subject (possibly equipment settling or cap removal); not yet investigated, noted as a 
   pattern to watch across subjects.
-- The amplitude-plausibility guard checks peak-to-peak amplitude only, not duration; one restEO 
-  segment (17 samples, ~34ms) passed the amplitude check despite being far shorter than a 
-  plausible blink (~200-400ms). Not used in the proof-of-concept; a duration check may be 
-  needed if the guard is extended to all segments.
+- HEOG amplitude and duration guard thresholds need their own justification (literature-based or
+  empirical) rather than reuse of VEOG's values, given the differing physiology of saccades vs.
+  blinks.
 - Open design decision: how subjects with zero valid (post-guard) segments in a given condition 
   (as occurred for this subject's restEC recording) should be represented downstream - e.g. 
   channel data left unchanged where no correction is possible.
@@ -102,6 +108,10 @@ Documented deviations from authors' code (behaviour change, justified):
   artefacts would be regressed against as if ocular in the original published method. This guard is 
   a stopgap addressing that specific gap, not a claim of perfectly separating artefact types, 
   pending a proper jump-detector implementation.
+- Duration-plausibility guard added alongside the amplitude guard, excluding segments shorter than
+  a physiologically plausible blink duration (~100 ms). Applied sequentially after the amplitude
+  guard, since the two test independent failure modes: one restEO candidate segment (17 samples,
+  ~34 ms) passed the amplitude check despite being far too brief to be a genuine blink.
 
 Corrected bug (authors' code):
 - Segment-padding first-branch used a hardcoded `Atrl[0,1]` reference instead of `Atrl[i,1]`, 

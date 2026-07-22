@@ -40,7 +40,7 @@ The `Responder` label was independently verified against raw BDI-II scores rathe
 ### Missingness
 No missingness in the fields used by this project (age, gender, BDI_pre, BDI_post, Responder) for the final 163-subject cohort - confirmed as a byproduct of the checks above. Broader spreadsheet fields (education, NEO-FFI, etc.) are out of scope for this project and were not audited, since they are not planned as model inputs.
 
-## Preprocessing status
+## Preprocessing status (22/7)
 
 Pipeline order (matching authors' `dataset` class methods): `bipolarEOG -> demean -> apply_filters -> correct_EOG`.
 

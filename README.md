@@ -46,74 +46,9 @@ Pipeline order (matching authors' `dataset` class methods): `bipolarEOG -> demea
 
 Completed and validated on pilot subject:
 - `bipolarEOG`
-- `demean` 
+- `demean`
 - `apply_filters`
-- `correct_EOG` (VEOG): artefact detection, segment padding, amplitude-plausibility guard, and
-  a duration-plausibility guard (see deviations below) validated. Gratton regression generalised
-  across all 26 EEG channels and all 6 amplitude- and duration-guarded restEO segments
-  (per-(channel, segment) coefficient estimation via unweighted least-squares, matching authors;
-  tukey-tapered correction weight; subtraction scoped to each flagged segment only). Validated
-  against the single-channel proof-of-concept (exact coefficient match, Fp1) and against expected
-  scalp physiology (mean coefficient by channel shows a monotonic frontal-to-posterior gradient,
-  strongest at Fp1/Fp2, near zero at occipital sites).
-- `correct_EOG` (HEOG): not yet implemented. Detection pipeline will follow the same structure as
-  VEOG (lowpass -> Hilbert envelope -> boxcar smoothing -> threshold -> segment collapse -> padding
-  -> guards), but amplitude and duration thresholds require independent justification rather than
-  reuse of VEOG's values, since saccade amplitude scales with gaze angle (unlike blink amplitude,
-  which is comparatively consistent) and saccades are typically shorter in duration than blinks.
+- `correct_EOG` (VEOG): artefact detection, segment padding, amplitude- and duration-plausibility guards validated. Gratton regression generalised across all 26 EEG channels and all 6 guarded restEO segments, validated against a single-channel proof-of-concept and expected scalp physiology.
+- `correct_EOG` (HEOG): artefact detection (with a z-scoring fix required for reliable detection), amplitude- and duration-plausibility guards, and Gratton regression generalised across all 26 EEG channels and all 7 guarded restEO segments, regressed onto the VEOG-corrected data per the authors' documented sequential order. A beta-plausibility guard excludes implausible per-segment coefficients arising from a known short-window regression limitation.
 
-### restEC artefact segments found to be non-ocular
-
-Both VEOG segments originally detected in the pilot subject's restEC (eyes-closed) recording 
-were found, on inspection, to be step/pop artefacts rather than genuine blinks: peak-to-peak 
-amplitude of 11,404.8 µV and 10,234.7 µV respectively, roughly one to two orders of magnitude 
-above a physiologically plausible blink (typically tens to a few hundred µV). Confirmed present in 
-the pre-`apply_filters` data, ruling out filtering as the cause. One of these segments coincides 
-with the F3 discontinuity noted below near the recording's end; the other coincides with two of 
-the three F3 discontinuities near samples ~14,000-16,500. Both restEC segments were excluded 
-by the amplitude-plausibility guard.
-
-The subject's restEO (eyes-open) recording was used instead for the regression proof-of-concept, 
-since eyes-open resting state reliably contains genuine blinks: 8 candidate segments were 
-detected, of which 7 passed the amplitude guard (peak-to-peak 67.9-576.6 µV) and 1 was 
-excluded (18,162.1 µV, again near the recording's end).
-
-**Known open items**:
-- Three step-like discontinuities in channel F3 (two near samples ~14,000-16,500, one near the 
-  recording's end, ~sample 60,000), flagged during `apply_filters` validation. Confirmed to 
-  coincide with the restEC step-artefact segments described above; not yet addressed with a 
-  dedicated jump/step-artefact detector.
-- Segments near the end of the recording appear artefact-prone in both restEC and restEO for 
-  this subject (possibly equipment settling or cap removal); not yet investigated, noted as a 
-  pattern to watch across subjects.
-- HEOG amplitude and duration guard thresholds need their own justification (literature-based or
-  empirical) rather than reuse of VEOG's values, given the differing physiology of saccades vs.
-  blinks.
-- Open design decision: how subjects with zero valid (post-guard) segments in a given condition 
-  (as occurred for this subject's restEC recording) should be represented downstream - e.g. 
-  channel data left unchanged where no correction is possible.
-
-Documented deviations from authors' code (library compatibility, no behaviour change):
-- `np.int` -> `int()` (deprecated in current NumPy)
-- `scipy.signal.boxcar` -> `scipy.signal.windows.boxcar` (relocated in current SciPy)
-
-Documented deviations from authors' code (behaviour change, justified):
-- One-sided z-score threshold (`z > threshold`) used in VEOG artefact detection, in place of the 
-  authors' two-sided condition, since the input (`boxdata`, an amplitude envelope) is non-negative 
-  by construction; the two-sided condition false-flagged ~76% of the recording as artefact due to 
-  distribution skew.
-- Amplitude-plausibility guard added before the Gratton regression, excluding segments with 
-  implausible peak-to-peak VEOG amplitude. The authors' own pipeline (`autopreprocess_pipeline.py`) 
-  runs `correct_EOG` before `detect_jumps`, with no equivalent safeguard - meaning step/pop 
-  artefacts would be regressed against as if ocular in the original published method. This guard is 
-  a stopgap addressing that specific gap, not a claim of perfectly separating artefact types, 
-  pending a proper jump-detector implementation.
-- Duration-plausibility guard added alongside the amplitude guard, excluding segments shorter than
-  a physiologically plausible blink duration (~100 ms). Applied sequentially after the amplitude
-  guard, since the two test independent failure modes: one restEO candidate segment (17 samples,
-  ~34 ms) passed the amplitude check despite being far too brief to be a genuine blink.
-
-Corrected bug (authors' code):
-- Segment-padding first-branch used a hardcoded `Atrl[0,1]` reference instead of `Atrl[i,1]`, 
-  incorrectly always referencing the first detected segment regardless of which segment was 
-  being padded.
+For full methodology detail, documented deviations from the authors' code, and open items, see [`docs/preprocessing_notes.md`](docs/preprocessing_notes.md).

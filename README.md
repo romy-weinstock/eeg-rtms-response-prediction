@@ -40,15 +40,15 @@ The `Responder` label was independently verified against raw BDI-II scores rathe
 ### Missingness
 No missingness in the fields used by this project (age, gender, BDI_pre, BDI_post, Responder) for the final 163-subject cohort - confirmed as a byproduct of the checks above. Broader spreadsheet fields (education, NEO-FFI, etc.) are out of scope for this project and were not audited, since they are not planned as model inputs.
 
-## Preprocessing status (22/7)
+## Preprocessing status (23/7)
 
-Pipeline order (matching authors' `dataset` class methods): `bipolarEOG -> demean -> apply_filters -> correct_EOG`.
+Pipeline order (matching authors' `dataset` class methods): `bipolarEOG -> demean -> apply_filters -> correct_EOG -> epoching -> artefact rejection`.
 
 Completed and validated on pilot subject:
-- `bipolarEOG`
-- `demean`
-- `apply_filters`
-- `correct_EOG` (VEOG): artefact detection, segment padding, amplitude- and duration-plausibility guards validated. Gratton regression generalised across all 26 EEG channels and all 6 guarded restEO segments, validated against a single-channel proof-of-concept and expected scalp physiology.
-- `correct_EOG` (HEOG): artefact detection (with a z-scoring fix required for reliable detection), amplitude- and duration-plausibility guards, and Gratton regression generalised across all 26 EEG channels and all 7 guarded restEO segments, regressed onto the VEOG-corrected data per the authors' documented sequential order. A beta-plausibility guard excludes implausible per-segment coefficients arising from a known short-window regression limitation.
+- `bipolarEOG`, `demean`, `apply_filters`
+- `correct_EOG` (VEOG and HEOG): full detection, guards, and Gratton regression generalised across all 26 EEG channels, both conditions (restEO, restEC).
+- Epoching: 5-second, non-overlapping windows, chosen for connectivity/synchrony-estimate quality rather than the authors' shorter default.
+- Artefact rejection: `autoreject` (Jas et al., 2017) adopted in place of the authors' seven `detect_*` methods, benchmarked against artefacts found by hand (F3 discontinuities, end-of-recording artefacts) - independently converged on the same locations. A targeted EMG bandpower supplement addresses the one documented gap in this choice.
+- Final output saved to `data/derivatives/<subject_id>/` (`.fif` epochs, EMG audit CSV).
 
 For full methodology detail, documented deviations from the authors' code, and open items, see [`docs/preprocessing_notes.md`](docs/preprocessing_notes.md).

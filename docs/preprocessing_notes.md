@@ -2,8 +2,7 @@
 
 ## Preprocessing status
 
-Pipeline order (matching authors' `dataset` class methods): `bipolarEOG -> demean -> apply_filters -> correct_EOG`.
-
+Pipeline order (matching authors' `dataset` class methods): `bipolarEOG -> demean -> apply_filters -> correct_EOG -> epoching -> artefact rejection`.
 Completed and validated on pilot subject:
 - `bipolarEOG`
 - `demean`
@@ -23,6 +22,9 @@ Completed and validated on pilot subject:
   sequential order (vertical eye movements corrected first, then horizontal). A beta-plausibility
   guard was added to exclude implausible per-(channel, segment) coefficients arising from a known
   short-window regression limitation (see deviations below).
+- Epoching: 5-second, non-overlapping windows (see rationale below).
+- Artefact rejection: `autoreject` adopted and benchmarked against known artefacts; EMG bandpower
+  supplement built and validated as a standing audit (see below).
 
 ### restEC artefact segments found to be non-ocular
 
@@ -58,11 +60,40 @@ threshold hypersensitive rather than robust. The adopted fix - trimmed mean/std,
 candidate segments (5.72% of the recording flagged), 5 of which closely align in timing with
 already-validated VEOG blink segments, independent evidence the fix detects genuine signal.
 
+## Epoching and artefact rejection (post-EOG-correction)
+
+**Epoch length**: 5 seconds, non-overlapping - a deliberate deviation from the authors' default
+(`trllength=2`, undocumented rationale in their code). Chosen for connectivity/synchrony-estimate
+quality (literature: >4s more accurate, >6s optimal) and because this project's ML pipeline
+classifies at the subject level (epoch-level features aggregated per subject), so epoch count
+doesn't set training-sample size the way it would for epoch-level classification.
+
+**Artefact rejection strategy**: `autoreject` (Jas, Engemann, Bekhti, Raimondo & Gramfort, 2017,
+*NeuroImage*, https://doi.org/10.1016/j.neuroimage.2017.06.030) adopted in place of replicating
+the authors' seven `detect_*` methods. The authors' methods trace to their own established
+clinical pipeline predating `autoreject` (TDBRAIN is a 20-year archive) - a legacy-continuity
+choice, not evidence against the tool. Full replication would require guard/validation work at
+the same scale as this project's VEOG/HEOG work, seven times over.
+
+**Benchmark result**: `autoreject`, using per-channel amplitude thresholds with no knowledge of
+this project's own detection/guard work, independently flagged the same artefacts found by hand -
+the end-of-recording artefact (both conditions) and the Day 5 F3 discontinuities (interpolated in
+restEC epochs 4-7, directly overlapping the visually-identified location). Strong convergent
+validation across three independent methods.
+
+**Documented gap and resolution**: `autoreject` operates on amplitude only, not frequency content,
+whereas the authors' `detect_emg` isolates 75-95 Hz specifically. A targeted bandpower supplement
+(same band/threshold as `detect_emg`, channel-within-epoch granularity) was built and cross-checked
+against `autoreject`'s own flags: 0 of 26 flagged pairs were missed by `autoreject` for this
+subject - the gap did not materialise here, though this is evidence for one subject, not a general
+finding. Retained as a standing per-subject audit when scaling to the full cohort, rather than
+treated as closed.
+
+**Output**: final corrected, epoched, artefact-rejected data saved to
+`data/derivatives/<subject_id>/` (`-epo.fif` per condition; EMG audit as a sparse per-flagged-pair
+CSV, including whether each flag was missed by `autoreject`, for later cohort-level aggregation).
+
 **Known open items**:
-- Three step-like discontinuities in channel F3 (two near samples ~14,000-16,500, one near the
-  recording's end, ~sample 60,000), flagged during `apply_filters` validation. Confirmed to
-  coincide with the restEC step-artefact segments described above; not yet addressed with a
-  dedicated jump/step-artefact detector.
 - Segments near the end of the recording appear artefact-prone in both restEC and restEO for
   this subject (possibly equipment settling or cap removal); not yet investigated, noted as a
   pattern to watch across subjects.
@@ -121,3 +152,4 @@ Corrected bug (authors' code):
 - Segment-padding first-branch used a hardcoded `Atrl[0,1]` reference instead of `Atrl[i,1]`,
   incorrectly always referencing the first detected segment regardless of which segment was
   being padded.
+

@@ -40,15 +40,16 @@ The `Responder` label was independently verified against raw BDI-II scores rathe
 ### Missingness
 No missingness in the fields used by this project (age, gender, BDI_pre, BDI_post, Responder) for the final 163-subject cohort - confirmed as a byproduct of the checks above. Broader spreadsheet fields (education, NEO-FFI, etc.) are out of scope for this project and were not audited, since they are not planned as model inputs.
 
-## Preprocessing status (23/7)
+## Preprocessing status (07/08)
 
 Pipeline order (matching authors' `dataset` class methods): `bipolarEOG -> demean -> apply_filters -> correct_EOG -> epoching -> artefact rejection`.
 
-Completed and validated on pilot subject:
-- `bipolarEOG`, `demean`, `apply_filters`
-- `correct_EOG` (VEOG and HEOG): full detection, guards, and Gratton regression generalised across all 26 EEG channels, both conditions (restEO, restEC).
-- Epoching: 5-second, non-overlapping windows, chosen for connectivity/synchrony-estimate quality rather than the authors' shorter default.
-- Artefact rejection: `autoreject` (Jas et al., 2017) adopted in place of the authors' seven `detect_*` methods, benchmarked against artefacts found by hand (F3 discontinuities, end-of-recording artefacts) - independently converged on the same locations. A targeted EMG bandpower supplement addresses the one documented gap in this choice.
-- Final output saved to `data/derivatives/<subject_id>/` (`.fif` epochs, EMG audit CSV).
+Methodology developed and validated on a single pilot subject in `notebooks/02_preprocessing_pilot.ipynb` (see [`docs/preprocessing_notes.md`](docs/preprocessing_notes.md) for full detail). This has since been refactored into reusable functions in `src/preprocessing.py`, each independently validated against the pilot notebook's results before being treated as correct:
+
+- `load_and_prepare_raw`, `bipolarEOG`, `demean`, `apply_filters` - direct ports of the validated pilot logic.
+- `detect_artefact_segments`, `amplitude_guard`, `duration_guard` - artefact detection and plausibility guards, generalised into shared functions for both VEOG and HEOG. One deliberate deviation from the pilot notebook: VEOG now uses the same trimmed z-scoring fix originally developed for HEOG only (see `docs/preprocessing_notes.md` for rationale and verification).
+- Gratton regression correction, epoching, and artefact rejection (`autoreject` + EMG bandpower audit) are validated in the pilot notebook but not yet refactored into `src/preprocessing.py`.
+
+Verification of the refactored functions against the pilot subject is in `notebooks/03_batch_test.ipynb`, which will also host the small-batch stress test (5-8 subjects) planned before scaling to the full 163-subject cohort.
 
 For full methodology detail, documented deviations from the authors' code, and open items, see [`docs/preprocessing_notes.md`](docs/preprocessing_notes.md).

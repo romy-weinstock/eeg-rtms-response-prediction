@@ -60,6 +60,35 @@ threshold hypersensitive rather than robust. The adopted fix - trimmed mean/std,
 candidate segments (5.72% of the recording flagged), 5 of which closely align in timing with
 already-validated VEOG blink segments, independent evidence the fix detects genuine signal.
 
+### VEOG z-scoring: extending the trimmed-mean fix
+
+The reusable batch module (`src/preprocessing.py`) applies trimmed mean/std z-scoring to VEOG
+as well as HEOG, rather than restricting the fix to HEOG only (as in the pilot notebook). This
+is a deliberate deviation from the pilot notebook's original treatment, not an oversight.
+
+**Rationale**: trimming the top 2% of the amplitude envelope before computing reference
+mean/std costs little when a channel has no inflation problem (the excluded tail is small and
+the trimmed statistics converge close to the untrimmed ones), but meaningfully protects against
+the case where one extreme artefact skews detection sensitivity elsewhere in the recording - the
+exact failure mode found for HEOG. Given this asymmetry, trimmed z-scoring was adopted as the
+single default for both channels rather than a per-channel choice.
+
+**Verified consequence, pilot subject (restEC)**: VEOG detection under trimming found 4
+candidate segments versus the pilot notebook's 2 (under standard z-scoring). The two segments
+matching the notebook's original findings are unchanged (both later excluded by the
+amplitude-plausibility guard as non-ocular step artefacts, consistent with the notebook). The
+two additional segments (`[10129:10257]`, `[20870:21212]`) were visually inspected and confirmed
+as genuine blinks - smooth, symmetric rise/fall shape, peak amplitudes ~150-165 µV, within the
+<300-400 µV range typical for genuine blinks at Fp1/VEOG (see amplitude-guard rationale above) -
+and both pass the amplitude and duration guards. This suggests standard z-scoring under-detected
+real blinks on this subject, for the same reason it under-detected HEOG saccades: the same
+non-ocular artefacts inflating the reference standard deviation and raising the effective
+detection threshold.
+
+**Open item**: verified on one subject only. Whether trimmed z-scoring on VEOG is uniformly
+beneficial (versus occasionally introducing false-positive detections) across the cohort is
+untested - a specific target for the small-batch stress test before full-cohort scaling.
+
 ## Epoching and artefact rejection (post-EOG-correction)
 
 **Epoch length**: 5 seconds, non-overlapping - a deliberate deviation from the authors' default
@@ -115,6 +144,11 @@ CSV, including whether each flag was missed by `autoreject`, for later cohort-le
 - Open design decision: how subjects with zero valid (post-guard) segments in a given condition
   should be represented downstream at scale (currently handled via an explicit per-subject log
   for the pilot subject's restEC condition; not yet a structured, reusable format for 163 subjects).
+- `detect_artefact_segments`'s parameters - `blink_amplitude_threshold_uv` (1000 µV) and
+  `trim_pct` (2%) - were both set from pilot-subject-specific observations (this subject's step
+  artefacts and end-of-recording artefact's magnitude/extent). Sorted as empirically-fit rather
+  than physiologically-grounded; require stress-testing on a small batch of additional subjects,
+  particularly ones with noisier or differently-shaped artefact profiles, before full-cohort use.
 
 Documented deviations from authors' code (library compatibility, no behaviour change):
 - `np.int` -> `int()` (deprecated in current NumPy)
@@ -147,6 +181,9 @@ Documented deviations from authors' code (behaviour change, justified):
   individual (channel, segment) correction coefficients that fall outside the range seen elsewhere -
   addresses a limitation of short-window least-squares regression, not addressed anywhere in the
   authors' original method.
+- Trimmed z-scoring (top 2% excluded) applied to VEOG as well as HEOG in the reusable batch
+  module, extending a fix originally scoped to HEOG only in the pilot notebook. See "VEOG
+  z-scoring" section above for rationale and pilot-subject verification.
 
 Corrected bug (authors' code):
 - Segment-padding first-branch used a hardcoded `Atrl[0,1]` reference instead of `Atrl[i,1]`,

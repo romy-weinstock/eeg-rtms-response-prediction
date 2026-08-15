@@ -190,3 +190,48 @@ Corrected bug (authors' code):
   incorrectly always referencing the first detected segment regardless of which segment was
   being padded.
 
+## Module refactor: full pipeline in src/preprocessing.py (complete)
+
+All pipeline steps validated in this document have been refactored into reusable functions
+in `src/preprocessing.py`, each independently validated against the pilot notebook's results
+before being treated as correct. Twelve functions plus one orchestrator:
+
+`load_and_prepare_raw`, `bipolarEOG`, `demean`, `apply_filters`, `detect_artefact_segments`,
+`amplitude_guard`, `duration_guard`, `gratton_regression`, `epoch_raw`, `run_autoreject`,
+`emg_bandpower_audit`, `save_epochs`, and `preprocess_subject` (orchestrator: runs the full
+chain for one subject, both conditions, with per-condition error handling).
+
+**Note on validation condition**: unlike the pilot notebook's original restEO-based validation
+of Gratton regression, the refactored `gratton_regression` function was validated here on
+restEC (see below).
+
+**Notable implementation findings during refactor:**
+- `gratton_regression`: MNE's `Raw.__getitem__` returns a `(data, times)` tuple, not a plain
+  array - using `raw[channel, start:end] -=` directly fails, since Python must read via
+  `__getitem__` before subtracting. Fixed by computing the corrected array explicitly, then
+  writing via `raw[channel, start:end] = corrected_array` (a plain assignment, which calls
+  `__setitem__`, a separate method taking a plain array). Confirmed via MNE's own source
+  (`mne/io/base.py`), not assumed.
+- `gratton_regression` validated against the pilot notebook's physiological finding, not just
+  numerical output: mean beta by channel reproduces the documented frontal-to-posterior
+  gradient (strongest ~0.27-0.39 at Fp1/Fp2, declining through fronto-central/temporal sites,
+  near-zero ~0.01 at occipital sites) on the pilot subject's VEOG-restEC segments.
+- `pd.DataFrame(rows)` on an empty `rows` list returns zero *columns*, not just zero rows -
+  a real batch-scale risk, since any per-subject aggregation code assuming fixed column names
+  would fail specifically on subjects with zero valid segments for a given channel/condition
+  (as restEC HEOG has for the pilot subject). Fixed by passing an explicit `columns=[...]` to
+  every `pd.DataFrame()` call that could receive an empty row list.
+- Orchestrator (`preprocess_subject`) validated end-to-end on a **fresh** load of the pilot
+  subject (not reusing an already-corrected `raw` from earlier testing) - both conditions
+  completed successfully: restEC 24->23 epochs retained, restEO 24->22 epochs retained, both
+  saved to `data/derivatives/sub-87999321/`. Epoch-drop counts are consistent with the
+  end-of-recording artefact pattern already documented above.
+
+**Open items, unchanged from the module refactor's earlier stages:**
+- Orchestrator has only been run successfully on the pilot subject - not yet tested on a
+  subject where HEOG has valid segments requiring correction (pilot subject's restEC HEOG had
+  none), and the per-condition `try/except` error handling has not been exercised by an actual
+  failure.
+- `blink_amplitude_threshold_uv=1000`, `trim_pct=2%`, and the VEOG trimmed z-scoring deviation
+  remain verified on one subject only - small-batch stress test still pending before
+  full-cohort scaling.

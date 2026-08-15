@@ -270,6 +270,211 @@ def duration_guard(segments, Fs, blink_duration_threshold = 100):
             valid_segments.append((start, end))
     return valid_segments, excluded_segments    
 
+## Gratton regression to remove VEOG/ HEOGfrom EEG channels function
+def gratton_regression(raw, eog_channel, valid_segments, beta_plausibility_bound = 1.0):
+    """
+    Apply Gratton regression to remove EOG artifacts from EEG channels.
 
+    Parameters:
+    raw (mne.io.Raw): The raw EEG data.
+    eog_channel (str): The name of the EOG channel to use for regression.
+    valid_segments (list of tuples): A list of tuples indicating the start and end indices of valid segments.
+    beta_plausibility_bound (float): The plausibility bound for the regression coefficient beta. Default is 1.0.
 
+    Returns:
+    raw (mne.io.Raw): The raw EEG data with EOG artifacts removed.
+    beta_df (pd.DataFrame): A DataFrame containing the regression coefficients and related information.
+    """
+    # Get the EOG channel data
+    eog_data = raw.get_data(picks=[eog_channel])[0]
+    # Get channel names for EEG channels
+    eeg_channel_names = [raw.ch_names[i] for i in mne.pick_types(raw.info, eeg=True, eog=False, ecg=False, emg=False, stim=False)]
+    # Initialize a list to store the regression coefficients
+    beta_rows = []
 
+    for channel in eeg_channel_names:
+        # Get the EEG channel data
+        ch_data = raw.get_data(picks=[channel])[0]
+        # Initialize a list to store the regression coefficients for this channel
+        for seg_id, (start, end) in enumerate(valid_segments):
+            #slice this channel's target and regressor data for this segment
+            ch_seg = ch_data[start:end]
+            eog_seg = eog_data[start:end]
+            # Estimate beta for this (channel, segment) pair
+            a = eog_seg.reshape(-1, 1)
+            b = ch_seg
+            x, residuals, rank, s = np.linalg.lstsq(a, b, rcond=None)
+            beta = x[0]
+            # Check if beta is within the plausibility bound
+            flagged = abs(beta) > beta_plausibility_bound 
+            N = end - start
+            if not flagged: # Tukey taper, scaled by this segment's own beta
+                taper = scipy.signal.windows.tukey(N, alpha=0.025)
+                eog_weight = taper * beta
+                corrected_seg = ch_seg - (eog_weight * eog_seg)
+                raw[channel, start:end] = corrected_seg
+            # Store the beta value for this segment
+            beta_rows.append({
+                'channel': channel, 
+                'segment_id': seg_id,
+                'beta': beta,
+                'start': start,
+                'end': end,
+                'n_samples': N,
+                'flagged': flagged
+            })  
+        
+    # Build the DataFrame once, after all channels and segments are done
+    beta_df = pd.DataFrame(beta_rows, columns=['channel', 'segment_id', 'beta', 'start', 'end', 'n_samples', 'flagged'])
+    return raw, beta_df
+
+## Epoch raw data into fixed-length, non-overlapping windows
+def epoch_raw(raw, epoch_duration=5.0):
+    """
+    Segment continuous raw data into fixed-length, non-overlapping epochs.
+
+    Parameters:
+    raw (mne.io.Raw): The corrected, filtered raw EEG data.
+    epoch_duration (float): Epoch length in seconds. Default is 5.0s.
+
+    Returns:
+    epochs (mne.Epochs): Fixed-length epochs, no overlap.
+    """
+    epochs = mne.make_fixed_length_epochs(raw, duration=epoch_duration, overlap=0.0, preload=True)
+    return epochs
+
+## Set standard montage and run autoreject
+def run_autoreject(epochs, montage_name='standard_1020', random_state=42):
+    """
+    Attach standard electrode positions and run autoreject on EEG channels.
+
+    Parameters:
+    epochs (mne.Epochs): Fixed-length epochs (pre-artefact-rejection).
+    montage_name (str): MNE standard montage name. Default 'standard_1020'.
+    random_state (int): Random seed for autoreject reproducibility. Default 42.
+
+    Returns:
+    epochs_clean (mne.Epochs): Epochs after autoreject (bad epochs dropped, bad channels interpolated).
+    reject_log (autoreject.RejectLog): Per-(epoch, channel) rejection labels.
+    """
+    from autoreject import AutoReject
+
+    montage = mne.channels.make_standard_montage(montage_name)
+    epochs.set_montage(montage, on_missing='warn')
+
+    picks_eeg = mne.pick_types(epochs.info, eeg=True)
+    ar = AutoReject(picks=picks_eeg, random_state=random_state)
+    epochs_clean, reject_log = ar.fit_transform(epochs, return_log=True)
+
+    return epochs_clean, reject_log
+    
+
+## EMG bandpower audit: flags (epoch, channel) pairs with elevated 75-95 Hz power,
+## cross-checked against autoreject's own flags to find what autoreject missed
+def emg_bandpower_audit(epochs, reject_log, emg_band=(75, 95), emg_threshold=4):
+    """
+    Flag (epoch, channel) pairs with elevated EMG-band power, and report which of
+    those were NOT already caught by autoreject.
+
+    Parameters:
+    epochs (mne.Epochs): Pre-autoreject epochs (montage already set).
+    reject_log (autoreject.RejectLog): autoreject's own per-(epoch, channel) labels.
+    emg_band (tuple): (low, high) Hz for the EMG bandpass. Default (75, 95).
+    emg_threshold (float): SD threshold for flagging. Default 4.
+
+    Returns:
+    audit_df (pd.DataFrame): One row per (epoch, channel) pair flagged by the EMG
+        check, with a column indicating whether autoreject missed it.
+    """
+    eeg_ch_names = [epochs.ch_names[i] for i in mne.pick_types(epochs.info, eeg=True)]
+
+    epochs_emg_band = epochs.copy().filter(l_freq=emg_band[0], h_freq=emg_band[1],
+                                             picks='eeg', verbose=False)
+    data = epochs_emg_band.get_data(picks='eeg')  # (n_epochs, n_channels, n_times)
+    bandpower = (data ** 2).mean(axis=2)  # mean squared amplitude per (epoch, channel)
+
+    z = (bandpower - bandpower.mean(axis=0)) / bandpower.std(axis=0)
+    emg_flags = np.abs(z) > emg_threshold
+
+    eeg_cols = [reject_log.ch_names.index(ch) for ch in eeg_ch_names]
+    ar_flagged = (reject_log.labels != 0)[:, eeg_cols]
+
+    rows = []
+    epoch_idx, ch_idx = np.where(emg_flags)
+    for e, c in zip(epoch_idx, ch_idx):
+        rows.append({
+            'epoch': e,
+            'channel': eeg_ch_names[c],
+            'missed_by_autoreject': not ar_flagged[e, c]
+        })
+    audit_df = pd.DataFrame(rows, columns=['epoch', 'channel', 'missed_by_autoreject'])
+    return audit_df
+
+## Save preprocessed epochs to disk, MNE's native format
+def save_epochs(epochs_clean, subject_id, condition, data_dir):
+    """
+    Save final artefact-rejected epochs to data/derivatives/<subject_id>/.
+
+    Parameters:
+    epochs_clean (mne.Epochs): Post-autoreject epochs.
+    subject_id (str): Subject ID, used in output filename and folder.
+    condition (str): Condition ('restEC' or 'restEO'), used in filename.
+    data_dir (str or Path): Base data directory (containing 'derivatives/').
+
+    Returns:
+    output_path (Path): Path the file was saved to.
+    """
+    output_dir = data_dir / "derivatives" / subject_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{subject_id}_{condition}-epo.fif"
+    epochs_clean.save(output_path, overwrite=True)
+    return output_path
+
+## Orchestrator: run the full pipeline for one subject, both conditions
+def preprocess_subject(subject_id, data_dir, beta_plausibility_bound=1.0,
+                        blink_amplitude_threshold_uv=1000, blink_duration_threshold=100,
+                        z_threshold=0.2, trim_pct=2, epoch_duration=5.0):
+    """
+    Run the full preprocessing pipeline for one subject, both conditions (restEC, restEO).
+
+    Returns:
+    results (dict): keyed by condition, each value a dict with 'status', 'n_epochs_before',
+        'n_epochs_after', 'emg_audit_df', 'output_path' (or 'error' if failed).
+    """
+    results = {}
+    for condition in ['restEC', 'restEO']:
+        try:
+            raw = load_and_prepare_raw(subject_id, condition, data_dir)
+            raw = bipolarEOG(raw)
+            raw = demean(raw)
+            raw = apply_filters(raw)
+
+            Fs = raw.info['sfreq']
+            for eog_channel in ['VEOG', 'HEOG']:
+                ch_data = raw.get_data(picks=[eog_channel])[0]
+                segments = detect_artefact_segments(ch_data, Fs, z_threshold=z_threshold, trim_pct=trim_pct)
+                valid_amp, _ = amplitude_guard(ch_data, segments, threshold=blink_amplitude_threshold_uv)
+                valid_dur, _ = duration_guard(valid_amp, Fs, blink_duration_threshold=blink_duration_threshold)
+                raw, _ = gratton_regression(raw, eog_channel, valid_dur, beta_plausibility_bound=beta_plausibility_bound)
+
+            epochs = epoch_raw(raw, epoch_duration=epoch_duration)
+            n_before = len(epochs)
+            epochs_clean, reject_log = run_autoreject(epochs)
+            n_after = len(epochs_clean)
+
+            emg_audit_df = emg_bandpower_audit(epochs, reject_log)
+            emg_audit_df['subject_id'] = subject_id
+            emg_audit_df['condition'] = condition
+
+            output_path = save_epochs(epochs_clean, subject_id, condition, data_dir)
+
+            results[condition] = {
+                'status': 'ok',
+                'n_epochs_before': n_before,
+                'n_epochs_after': n_after,
+                'emg_audit_df': emg_audit_df,
+                'output_path': output_path
+            }
+        except Exception as e:
+            results[condition] = {'status': 'error', 'error': str(e)}
+    return results

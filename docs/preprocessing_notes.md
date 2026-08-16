@@ -201,37 +201,75 @@ before being treated as correct. Twelve functions plus one orchestrator:
 `emg_bandpower_audit`, `save_epochs`, and `preprocess_subject` (orchestrator: runs the full
 chain for one subject, both conditions, with per-condition error handling).
 
-**Note on validation condition**: unlike the pilot notebook's original restEO-based validation
-of Gratton regression, the refactored `gratton_regression` function was validated here on
-restEC (see below).
+## Small-batch stress test: findings and fixes
 
-**Notable implementation findings during refactor:**
-- `gratton_regression`: MNE's `Raw.__getitem__` returns a `(data, times)` tuple, not a plain
-  array - using `raw[channel, start:end] -=` directly fails, since Python must read via
-  `__getitem__` before subtracting. Fixed by computing the corrected array explicitly, then
-  writing via `raw[channel, start:end] = corrected_array` (a plain assignment, which calls
-  `__setitem__`, a separate method taking a plain array). Confirmed via MNE's own source
-  (`mne/io/base.py`), not assumed.
-- `gratton_regression` validated against the pilot notebook's physiological finding, not just
-  numerical output: mean beta by channel reproduces the documented frontal-to-posterior
-  gradient (strongest ~0.27-0.39 at Fp1/Fp2, declining through fronto-central/temporal sites,
-  near-zero ~0.01 at occipital sites) on the pilot subject's VEOG-restEC segments.
-- `pd.DataFrame(rows)` on an empty `rows` list returns zero *columns*, not just zero rows -
-  a real batch-scale risk, since any per-subject aggregation code assuming fixed column names
-  would fail specifically on subjects with zero valid segments for a given channel/condition
-  (as restEC HEOG has for the pilot subject). Fixed by passing an explicit `columns=[...]` to
-  every `pd.DataFrame()` call that could receive an empty row list.
-- Orchestrator (`preprocess_subject`) validated end-to-end on a **fresh** load of the pilot
-  subject (not reusing an already-corrected `raw` from earlier testing) - both conditions
-  completed successfully: restEC 24->23 epochs retained, restEO 24->22 epochs retained, both
-  saved to `data/derivatives/sub-87999321/`. Epoch-drop counts are consistent with the
-  end-of-recording artefact pattern already documented above.
+Ran `preprocess_subject` on 6 additional subjects (stratified by age tercile,
+responder/non-responder balance, and self-reported sleep/wellness as a noise-risk proxy),
+plus the pilot subject - 14 subject/condition runs total, 0 errors.
 
-**Open items, unchanged from the module refactor's earlier stages:**
-- Orchestrator has only been run successfully on the pilot subject - not yet tested on a
-  subject where HEOG has valid segments requiring correction (pilot subject's restEC HEOG had
-  none), and the per-condition `try/except` error handling has not been exercised by an actual
-  failure.
-- `blink_amplitude_threshold_uv=1000`, `trim_pct=2%`, and the VEOG trimmed z-scoring deviation
-  remain verified on one subject only - small-batch stress test still pending before
-  full-cohort scaling.
+**`autoreject` parameter instability**: 5 of 12 initial runs showed `consensus=1.00,
+n_interpolate~25` (near-maximal channel count) - an extreme, minimally-discriminating
+parameter combination. Investigated via `cv=5` (vs. default 10): did not resolve the pattern,
+and destabilised a previously-normal result in the control subject, ruling out fold count as
+the primary cause. Follow-up random-seed test (`sub-88030641`, `cv=10`, seeds 0/7/42) found
+the instability is condition-specific: restEC gave the identical extreme result across all
+three seeds (stable, not noise); restEO varied meaningfully with seed. A majority-vote
+epoch-drop ensemble was built and tested (see `03_batch_test.ipynb`) but not adopted: it only
+addresses epoch-drop decisions, not per-channel interpolation quality, which matters more for
+this project's subject-level, epoch-aggregated features. Decision: retain `autoreject`'s
+default parameters (`cv=10`, fixed `random_state`) for reproducibility, and instead capture
+`consensus`/`n_interpolate` as QC metadata per subject/condition
+(`autoreject_consensus`, `autoreject_n_interpolate`, `autoreject_extreme` in
+`preprocess_subject`'s output), flagging `consensus >= 0.9`. Planned use: a sensitivity check
+at the modelling stage (does classification performance change if flagged subjects are
+excluded or down-weighted), rather than a preprocessing-stage fix for an incompletely
+characterised problem.
+
+**HEOG detection over-flagging drift as valid segments**: batch HEOG candidate counts
+(30-86 per subject) were far higher than the pilot subject's 2-8. Visual inspection of 6
+sampled "valid" segments (`sub-88047245`, restEC) found durations from 92 ms to 4,112 ms -
+several multiples longer than any genuine saccade. Literature confirms saccades are ballistic
+movements typically lasting 30-120 ms (patent US5726916), with mean durations ~36-37 ms in a
+conjunctive visual search task (SD ~14 ms; Resca, Greenwood & Keech, 2013, in *Eye Movement*,
+ed. L. C. Stewart, Nova Science Publishers, ISBN 978-1-62808-601-0), and that saccades and
+baseline EOG drift are recognised as occupying distinct timescales (Bögels & Kayser, 2022,
+*Journal of Neurophysiology*, https://doi.org/10.1152/jn.00076.2022). `duration_guard`
+previously enforced only a minimum duration; added an optional `max_duration_threshold`
+parameter (defaults to `None`, so VEOG calls are unaffected), applied at 200 ms for HEOG only
+in `preprocess_subject` (new parameter `heog_max_duration_threshold`). Confirmed effective:
+`sub-88047245` restEC dropped from 53 to 7 valid candidates, all previously-excluded segments
+exceeding 200 ms.
+
+**HEOG correction confidence - open item, not resolved**: a follow-up visual check of the 7
+post-fix survivors found the improvement is real but incomplete. Unlike VEOG's validated blinks
+(clean, isolated deflection returning to a visibly quiet baseline), most of the 7 HEOG segments
+showed step-shifts to a new baseline level, continuous trends with no distinct feature at the
+flagged region, or a deflection against an already-noisy baseline. Two explanations remain
+undistinguished: shorter-duration noise/drift still passing the guard, or HEOG's baseline being
+inherently noisier than VEOG's by nature (continuous small eye-position adjustments vs.
+discrete blinks). HEOG-based correction should be treated as lower-confidence than VEOG-based
+correction pending further investigation.
+
+**Would `autoreject` catch mis-corrected drift downstream, as a safety net?** No - confirmed
+not reliable. `autoreject` only operates on EEG-typed channels; it never sees HEOG directly.
+The indirect risk (a drift-derived beta imprinting a spurious trend onto EEG channels via
+Gratton regression) is only caught if the resulting distortion happens to exceed `autoreject`'s
+amplitude thresholds, which is not guaranteed for a smooth, low-amplitude trend. This
+confirmed the guard-level fix was necessary rather than optional.
+
+**Re-verification after the fix**: re-ran the full 7-subject batch through `preprocess_subject`
+with `heog_max_duration_threshold=200` wired in. All 14 subject/condition runs succeeded (0
+errors); epoch counts after `autoreject` were consistent with the pre-fix batch run for 6 of 7
+subjects. One exception: `sub-88052329` restEO dropped 4 epochs post-fix versus 1 pre-fix, with
+no other parameter changed between runs - plausibly explained by the HEOG fix altering which
+segments were corrected, slightly changing the EEG signal `autoreject` evaluates, but not
+confirmed. Noted as an observed difference, not investigated further.
+
+**Updated open items**:
+- HEOG correction confidence (above) - unresolved.
+- `blink_amplitude_threshold_uv=1000` and `trim_pct=2` (VEOG/general) remain
+  empirically-fit-to-pilot-subject in origin, though now exercised across 7 subjects without
+  evidence of failure.
+- Orchestrator's per-condition `try/except` has never been triggered by a real failure (0
+  errors across 14 runs) - untested exception-handling path.
+- Full cohort (163 subjects) not yet run - only 7 tested to date.

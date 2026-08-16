@@ -40,14 +40,15 @@ The `Responder` label was independently verified against raw BDI-II scores rathe
 ### Missingness
 No missingness in the fields used by this project (age, gender, BDI_pre, BDI_post, Responder) for the final 163-subject cohort - confirmed as a byproduct of the checks above. Broader spreadsheet fields (education, NEO-FFI, etc.) are out of scope for this project and were not audited, since they are not planned as model inputs.
 
-## Preprocessing status (15/08/2026)
+## Preprocessing status (16/08/2026)
 
 Pipeline order (matching authors' `dataset` class methods): `bipolarEOG -> demean -> apply_filters -> correct_EOG -> epoching -> artefact rejection`.
 
-Methodology developed and validated on a single pilot subject in `notebooks/02_preprocessing_pilot.ipynb`. Fully refactored into `src/preprocessing.py`: twelve reusable functions covering the complete pipeline (raw BDF loading through corrected, epoched, artefact-rejected output), plus a `preprocess_subject` orchestrator that runs the full chain for one subject, both conditions.
+Methodology developed and validated on a single pilot subject in `notebooks/02_preprocessing_pilot.ipynb`. Fully refactored into `src/preprocessing.py`: twelve reusable functions covering the complete pipeline, plus a `preprocess_subject` orchestrator that runs the full chain for one subject, both conditions, with per-condition error handling and QC metadata capture.
 
-Each function independently validated against the pilot notebook's results, including the Gratton regression correction step, which reproduces the pilot's documented frontal-to-posterior EOG-contamination gradient by channel. The orchestrator has been validated end-to-end on the pilot subject from a fresh data load.
+**Small-batch stress test complete** (6 subjects, stratified by age/responder-status/self-reported sleep-wellness, plus the pilot subject - 7 subjects, 14 subject/condition runs, 0 errors). Two real findings surfaced and addressed:
 
-**Not yet done**: small-batch stress test (5-8 subjects) of the empirically-fit thresholds (`blink_amplitude_threshold_uv`, `trim_pct`) before full-cohort scaling; orchestrator untested on a subject with valid HEOG segments requiring correction.
+- **`autoreject` parameter instability at ~24 epochs/subject**: investigated via CV-fold and random-seed variation; found to be a genuine, only partially understood limitation of parameter search at this sample size, not fixable by a simple parameter change. Resolved by capturing `consensus`/`n_interpolate` as QC metadata per subject/condition (`autoreject_extreme` flag) rather than attempting a fix — planned as a sensitivity check at the modelling stage.
+- **HEOG artefact detection over-flagging slow drift as valid segments**: visual inspection found flagged "segments" up to 4+ seconds long — far exceeding genuine saccade duration (literature: 30-120 ms). Fixed with a literature-grounded maximum-duration guard (200 ms, HEOG-specific). Confirmed effective (53 -> 7 candidates on one test case), though a follow-up visual check found HEOG correction still warrants lower confidence than VEOG correction — an open item, not fully resolved.
 
 For full methodology detail, documented deviations from the authors' code, and open items, see [`docs/preprocessing_notes.md`](docs/preprocessing_notes.md).

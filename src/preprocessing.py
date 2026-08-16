@@ -5,11 +5,10 @@
 import numpy as np
 import pandas as pd 
 from pathlib import Path    
-import mne
-from scipy.stats import zscore   
+import mne  
 import scipy.signal
 
-#Find the root of the repository to set the data directory
+## Find the root of the repository to set the data directory
 
 def find_repo_root(marker = ".git"): 
     """
@@ -23,7 +22,7 @@ def find_repo_root(marker = ".git"):
     raise FileNotFoundError(f"Could not find {marker} in any parent directory of {current_path}")
  
 
-##Load raw BDF + fix channel types function
+## Load raw BDF + fix channel types function
 def load_and_prepare_raw(subject_id, condition, data_dir):
     """
     Load raw EEG data from a BDF file, set channel types, and return the raw object.
@@ -58,7 +57,7 @@ def load_and_prepare_raw(subject_id, condition, data_dir):
     return condition_raw
 
 
-#'bipolarEOG' function  
+## 'bipolarEOG' function  
 def bipolarEOG(raw):
     """
     Create a bipolar EOG channel by subtracting the vertical EOG channels.
@@ -247,28 +246,35 @@ def amplitude_guard(channel_data, segments, threshold=1000):
             valid_segments.append((start, end))
     return valid_segments, excluded_segments
 
-## Duration guard to exclude segments that are too short to be a genuine blink
-def duration_guard(segments, Fs, blink_duration_threshold = 100):
+## Duration guard to exclude segments too short (or, optionally, too long) to be a genuine blink/saccade
+def duration_guard(segments, Fs, blink_duration_threshold=100, max_duration_threshold=None):
     """
-    Apply a duration guard to exclude segments that are too short to be a genuine blink.
+    Apply a duration guard to exclude segments that are too short - or, if specified,
+    too long - to be a genuine blink or saccade.
 
     Parameters:
-    Fs (float): The sampling frequency in Hz. 
-    segments (list of tuples): A list of tuples indicating the start and end indices of segments that passed the amplitude guard.
-    blink_duration_threshold (float): The minimum duration in milliseconds. Default is 100 ms.
+    segments (list of tuples): Segments that passed the amplitude guard.
+    Fs (float): The sampling frequency in Hz.
+    blink_duration_threshold (float): Minimum duration in ms. Default 100.
+    max_duration_threshold (float or None): Maximum duration in ms. Default None (no upper
+        bound). Recommended for HEOG, where slow drift periods can otherwise pass the
+        minimum-duration check unfiltered - see docs/preprocessing_notes.md. Not currently
+        applied to VEOG, where no evidence of this issue has been found.
 
     Returns:
-    valid_segments (list of tuples): A list of tuples indicating the start and end indices of valid segments.
-    excluded_segments (list of tuples): A list of tuples indicating the start and end indices of excluded segments.
+    valid_segments (list of tuples): Segments within the duration bounds.
+    excluded_segments (list of tuples): Segments outside the duration bounds.
     """
     valid_segments, excluded_segments = [], []
     for (start, end) in segments:
         duration = (end - start) / Fs * 1000
-        if duration < blink_duration_threshold:
+        too_short = duration < blink_duration_threshold
+        too_long = max_duration_threshold is not None and duration > max_duration_threshold
+        if too_short or too_long:
             excluded_segments.append((start, end))
         else:
             valid_segments.append((start, end))
-    return valid_segments, excluded_segments    
+    return valid_segments, excluded_segments   
 
 ## Gratton regression to remove VEOG/ HEOGfrom EEG channels function
 def gratton_regression(raw, eog_channel, valid_segments, beta_plausibility_bound = 1.0):
@@ -344,7 +350,7 @@ def epoch_raw(raw, epoch_duration=5.0):
     return epochs
 
 ## Set standard montage and run autoreject
-def run_autoreject(epochs, montage_name='standard_1020', random_state=42):
+def run_autoreject(epochs, montage_name='standard_1020', random_state=42, cv=10):
     """
     Attach standard electrode positions and run autoreject on EEG channels.
 
@@ -352,10 +358,14 @@ def run_autoreject(epochs, montage_name='standard_1020', random_state=42):
     epochs (mne.Epochs): Fixed-length epochs (pre-artefact-rejection).
     montage_name (str): MNE standard montage name. Default 'standard_1020'.
     random_state (int): Random seed for autoreject reproducibility. Default 42.
+    cv (int): Number of CV folds for autoreject's parameter search. Default 10.
 
     Returns:
-    epochs_clean (mne.Epochs): Epochs after autoreject (bad epochs dropped, bad channels interpolated).
+    epochs_clean (mne.Epochs): Epochs after autoreject.
     reject_log (autoreject.RejectLog): Per-(epoch, channel) rejection labels.
+    qc_info (dict): {'consensus': float, 'n_interpolate': int} - autoreject's selected
+    parameters for the EEG channel type, for downstream QC flagging 
+    (see docs/preprocessing_notes.md for the seed-instability investigation and why the default is kept).
     """
     from autoreject import AutoReject
 
@@ -363,11 +373,13 @@ def run_autoreject(epochs, montage_name='standard_1020', random_state=42):
     epochs.set_montage(montage, on_missing='warn')
 
     picks_eeg = mne.pick_types(epochs.info, eeg=True)
-    ar = AutoReject(picks=picks_eeg, random_state=random_state)
+    ar = AutoReject(picks=picks_eeg, random_state=random_state, cv=cv)
     epochs_clean, reject_log = ar.fit_transform(epochs, return_log=True)
 
-    return epochs_clean, reject_log
-    
+    qc_info = {'consensus': ar.consensus_['eeg'], 'n_interpolate': ar.n_interpolate_['eeg']}
+
+    return epochs_clean, reject_log, qc_info
+
 
 ## EMG bandpower audit: flags (epoch, channel) pairs with elevated 75-95 Hz power,
 ## cross-checked against autoreject's own flags to find what autoreject missed
@@ -433,13 +445,30 @@ def save_epochs(epochs_clean, subject_id, condition, data_dir):
 ## Orchestrator: run the full pipeline for one subject, both conditions
 def preprocess_subject(subject_id, data_dir, beta_plausibility_bound=1.0,
                         blink_amplitude_threshold_uv=1000, blink_duration_threshold=100,
-                        z_threshold=0.2, trim_pct=2, epoch_duration=5.0):
+                        heog_max_duration_threshold=200,
+                        z_threshold=0.2, trim_pct=2, epoch_duration=5.0, autoreject_cv=10):
     """
     Run the full preprocessing pipeline for one subject, both conditions (restEC, restEO).
 
+    Parameters:
+    subject_id (str): The ID of the subject.
+    data_dir (str or Path): The directory where the BDF files are stored.
+    beta_plausibility_bound (float): Plausibility bound for Gratton regression beta. Default 1.0.
+    blink_amplitude_threshold_uv (float): Amplitude guard threshold, in µV. Default 1000.
+    blink_duration_threshold (float): Minimum duration guard threshold, in ms. Default 100.
+    heog_max_duration_threshold (float or None): Maximum duration guard threshold for HEOG
+        only, in ms. Default 200, addressing HEOG drift periods incorrectly passing as valid
+        segments - see docs/preprocessing_notes.md. Not applied to VEOG (no evidence of the
+        same issue there).
+    z_threshold (float): Z-score threshold for artefact detection. Default 0.2.
+    trim_pct (float): Percentage trimmed for reference mean/std in artefact detection. Default 2.
+    epoch_duration (float): Epoch length in seconds. Default 5.0.
+    autoreject_cv (int): Number of CV folds for autoreject's parameter search. Default 10.
+
     Returns:
     results (dict): keyed by condition, each value a dict with 'status', 'n_epochs_before',
-        'n_epochs_after', 'emg_audit_df', 'output_path' (or 'error' if failed).
+        'n_epochs_after', 'emg_audit_df', 'output_path', 'autoreject_consensus',
+        'autoreject_n_interpolate', 'autoreject_extreme' (or 'error' if failed).
     """
     results = {}
     for condition in ['restEC', 'restEO']:
@@ -454,12 +483,14 @@ def preprocess_subject(subject_id, data_dir, beta_plausibility_bound=1.0,
                 ch_data = raw.get_data(picks=[eog_channel])[0]
                 segments = detect_artefact_segments(ch_data, Fs, z_threshold=z_threshold, trim_pct=trim_pct)
                 valid_amp, _ = amplitude_guard(ch_data, segments, threshold=blink_amplitude_threshold_uv)
-                valid_dur, _ = duration_guard(valid_amp, Fs, blink_duration_threshold=blink_duration_threshold)
+                max_dur = heog_max_duration_threshold if eog_channel == 'HEOG' else None
+                valid_dur, _ = duration_guard(valid_amp, Fs, blink_duration_threshold=blink_duration_threshold,
+                                               max_duration_threshold=max_dur)
                 raw, _ = gratton_regression(raw, eog_channel, valid_dur, beta_plausibility_bound=beta_plausibility_bound)
 
             epochs = epoch_raw(raw, epoch_duration=epoch_duration)
             n_before = len(epochs)
-            epochs_clean, reject_log = run_autoreject(epochs)
+            epochs_clean, reject_log, qc_info = run_autoreject(epochs, cv=autoreject_cv)
             n_after = len(epochs_clean)
 
             emg_audit_df = emg_bandpower_audit(epochs, reject_log)
@@ -473,7 +504,10 @@ def preprocess_subject(subject_id, data_dir, beta_plausibility_bound=1.0,
                 'n_epochs_before': n_before,
                 'n_epochs_after': n_after,
                 'emg_audit_df': emg_audit_df,
-                'output_path': output_path
+                'output_path': output_path,
+                'autoreject_consensus': qc_info['consensus'],
+                'autoreject_n_interpolate': qc_info['n_interpolate'],
+                'autoreject_extreme': qc_info['consensus'] >= 0.9
             }
         except Exception as e:
             results[condition] = {'status': 'error', 'error': str(e)}

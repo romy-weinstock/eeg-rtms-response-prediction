@@ -16,12 +16,10 @@ Completed and validated on pilot subject:
   scalp physiology (mean coefficient by channel shows a monotonic frontal-to-posterior gradient,
   strongest at Fp1/Fp2, near zero at occipital sites).
 - `correct_EOG` (HEOG): artefact detection, amplitude-plausibility guard, and duration-plausibility
-  guard validated (see deviations below for a detection fix required before guards could be
-  applied meaningfully). Gratton regression generalised across all 26 EEG channels and all 7
-  guarded restEO segments, regressed onto the VEOG-corrected data per the authors' documented
-  sequential order (vertical eye movements corrected first, then horizontal). A beta-plausibility
-  guard was added to exclude implausible per-(channel, segment) coefficients arising from a known
-  short-window regression limitation (see deviations below).
+  guard validated on the pilot subject (see deviations below for a detection fix required before
+  guards could be applied meaningfully). **Since revised** - see "Small-batch stress test" section
+  below: a maximum-duration bound was added after batch testing found the original guard
+  insufficient, and HEOG correction confidence remains an open item.
 - Epoching: 5-second, non-overlapping windows (see rationale below).
 - Artefact rejection: `autoreject` adopted and benchmarked against known artefacts; EMG bandpower
   supplement built and validated as a standing audit (see below).

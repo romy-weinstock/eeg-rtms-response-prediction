@@ -40,15 +40,12 @@ The `Responder` label was independently verified against raw BDI-II scores rathe
 ### Missingness
 No missingness in the fields used by this project (age, gender, BDI_pre, BDI_post, Responder) for the final 163-subject cohort - confirmed as a byproduct of the checks above. Broader spreadsheet fields (education, NEO-FFI, etc.) are out of scope for this project and were not audited, since they are not planned as model inputs.
 
-## Preprocessing status (16/08/2026)
+## Preprocessing status (17/08/2026) - complete
 
 Pipeline order (matching authors' `dataset` class methods): `bipolarEOG -> demean -> apply_filters -> correct_EOG -> epoching -> artefact rejection`.
 
-Methodology developed and validated on a single pilot subject in `notebooks/02_preprocessing_pilot.ipynb`. Fully refactored into `src/preprocessing.py`: twelve reusable functions covering the complete pipeline, plus a `preprocess_subject` orchestrator that runs the full chain for one subject, both conditions, with per-condition error handling and QC metadata capture.
+Methodology developed and validated on a single pilot subject in `notebooks/02_preprocessing_pilot.ipynb`, refactored into `src/preprocessing.py` (twelve functions plus a `preprocess_subject` orchestrator), and validated at increasing scale: pilot subject, a 6-subject stratified batch (`notebooks/03_batch_test.ipynb`), and the full 160-subject usable cohort (`notebooks/04_full_cohort_run.ipynb`).
 
-**Small-batch stress test complete** (6 subjects, stratified by age/responder-status/self-reported sleep-wellness, plus the pilot subject - 7 subjects, 14 subject/condition runs, 0 errors). Two real findings surfaced and addressed:
+**Full-cohort results**: 160 of 163 subjects usable (3 have no source data present, not a pipeline issue). Two parallel output variants produced (`data/derivatives_heog_off/`, `data/derivatives_heog_on/`) for a planned modelling-stage sensitivity check on HEOG correction. `autoreject` parameter instability, investigated and characterised earlier, confirmed at full scale (~38% of subject/conditions flagged) and captured as QC metadata rather than excluded. Epoch retention: median 95.8%.
 
-- **`autoreject` parameter instability at ~24 epochs/subject**: investigated via CV-fold and random-seed variation; found to be a genuine, only partially understood limitation of parameter search at this sample size, not fixable by a simple parameter change. Resolved by capturing `consensus`/`n_interpolate` as QC metadata per subject/condition (`autoreject_extreme` flag) rather than attempting a fix — planned as a sensitivity check at the modelling stage.
-- **HEOG artefact detection over-flagging slow drift as valid segments**: visual inspection found flagged "segments" up to 4+ seconds long — far exceeding genuine saccade duration (literature: 30-120 ms). Fixed with a literature-grounded maximum-duration guard (200 ms, HEOG-specific). Confirmed effective (53 -> 7 candidates on one test case), though a follow-up visual check found HEOG correction still warrants lower confidence than VEOG correction — an open item, not fully resolved.
-
-For full methodology detail, documented deviations from the authors' code, and open items, see [`docs/preprocessing_notes.md`](docs/preprocessing_notes.md).
+**Known limitations, documented rather than silently resolved**: HEOG correction confidence is improved (baseline-drift removal, literature-grounded duration bounds) but not fully resolved - HEOG correction is off by default. Full detail, all documented deviations from the authors' code, and the complete decision trail: see [`docs/preprocessing_notes.md`](docs/preprocessing_notes.md).

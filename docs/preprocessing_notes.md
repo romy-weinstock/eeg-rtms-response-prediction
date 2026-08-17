@@ -307,3 +307,59 @@ used for detection - unresolved, documented in the function's docstring.
   failure.
 - Orchestrator's per-condition `try/except` has never been triggered by a real failure.
 - Full cohort (163 subjects) not yet run - only 7 tested to date.
+
+## Full cohort run: results and downstream decisions
+
+Ran `preprocess_subject` across the full 163-subject cohort, producing two parallel variants
+(`heog_off`: `apply_heog_correction=False`, default; `heog_on`: `apply_heog_correction=True`),
+both conditions each - 652 subject/condition/variant combinations.
+
+**Missing data**: 3 subjects (`sub-88026321`, `sub-88022133`, `sub-88041397`) have no BDF
+files present under `data/TDBRAIN_Dataset_V3_1/`, despite being listed in
+`cohort_filtered_n163.xlsx`. Confirmed via direct directory check (not a path/naming bug in
+this pipeline - the subject folders themselves don't exist). All 12 resulting errors (3
+subjects x 2 conditions x 2 variants) are `FileNotFoundError`, caught cleanly by the
+orchestrator's per-condition `try/except` - the first real exercise of that error handling at
+scale, working as designed. **Usable cohort: 160 of 163 subjects.**
+
+**`autoreject` extreme-flag rate, confirmed at full scale**: 38.1% (heog_off) / 37.2%
+(heog_on) of subject/condition combinations show `consensus>=0.9` - closely matching the
+small-batch estimate (~42%, 5/12). This is now a robust, cohort-wide finding: roughly 1 in 3
+subject/condition combinations hits the previously-investigated parameter-instability pattern
+(see "autoreject parameter instability" above). Confirmed as planned: `autoreject_consensus`,
+`autoreject_n_interpolate`, `autoreject_extreme` are available per subject/condition/variant
+in `data/batch_results_log_full_cohort.csv` for the modelling-stage sensitivity check.
+
+**Epoch retention**: median 95.8%, minimum 41.7% (`sub-88068885`, restEO: 10/24 retained).
+Checked the lowest-retention subjects specifically: all show `autoreject_extreme=False`,
+indicating genuine artefact content correctly rejected rather than the parameter-instability
+failure mode - i.e., low retention here reflects real between-subject variation in recording
+quality, not a pipeline defect. Not conflated with the extreme-flag finding above; they are
+two distinct, separately-measured phenomena.
+
+**HEOG segment counts, full cohort**: mean 73.6 candidates / 14.3 valid per subject/condition
+(range 4-155 candidates, 0-53 valid) - confirms and extends the small-batch pattern (30-90
+candidates), with substantial between-subject variation. At least one subject/condition has
+zero valid HEOG segments even post-improvement, consistent with the pilot subject's restEC
+finding.
+
+**Decisions for downstream feature extraction / modelling**:
+1. **`heog_off` is the primary dataset.** VEOG correction is well-validated; HEOG correction
+   confidence remains only partially resolved (see above) and known to regress against
+   non-detrended data if ever enabled. `heog_on` exists specifically as the comparison arm for
+   an explicit sensitivity check ("does HEOG correction change classification results"), not
+   as an equally-trusted alternative primary dataset.
+2. **All 160 usable subjects proceed to feature extraction, with QC flags carried as metadata,
+   not used to exclude subjects at this stage.** `autoreject_extreme` and low-retention
+   subjects were checked and found to plausibly reflect genuine data quality variation rather
+   than pipeline malfunction, consistent with the approach already taken for the HEOG
+   uncertainty - defer to an empirical, reported sensitivity check at the modelling stage
+   (e.g. does excluding `autoreject_extreme` subjects or applying a minimum-epoch-count cutoff
+   change results) rather than silently excluding before that question can even be asked.
+3. Feature extraction must read subject lists from what's actually present in the derivatives
+   folders (160 subjects), not assume the original 163-subject cohort list.
+
+**This closes the preprocessing phase.** Full function set validated (pilot subject, 6-subject
+stratified batch, full 160-subject cohort); known limitations documented with evidence rather
+than assumed; decisions for the next phase made explicitly rather than left implicit.
+

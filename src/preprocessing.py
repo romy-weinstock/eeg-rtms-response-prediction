@@ -462,20 +462,23 @@ def emg_bandpower_audit(epochs, reject_log, emg_band=(75, 95), emg_threshold=4):
     return audit_df
 
 ## Save preprocessed epochs to disk, MNE's native format
-def save_epochs(epochs_clean, subject_id, condition, data_dir):
+def save_epochs(epochs_clean, subject_id, condition, data_dir, derivatives_dirname="derivatives"):
     """
-    Save final artefact-rejected epochs to data/derivatives/<subject_id>/.
+    Save final artefact-rejected epochs to data/<derivatives_dirname>/<subject_id>/.
 
     Parameters:
     epochs_clean (mne.Epochs): Post-autoreject epochs.
     subject_id (str): Subject ID, used in output filename and folder.
     condition (str): Condition ('restEC' or 'restEO'), used in filename.
-    data_dir (str or Path): Base data directory (containing 'derivatives/').
+    data_dir (str or Path): Base data directory.
+    derivatives_dirname (str): Name of the derivatives subfolder. Default "derivatives".
+        Overridden for parallel-variant runs (e.g. "derivatives_heog_on") - see
+        docs/preprocessing_notes.md.
 
     Returns:
     output_path (Path): Path the file was saved to.
     """
-    output_dir = data_dir / "derivatives" / subject_id
+    output_dir = data_dir / derivatives_dirname / subject_id
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{subject_id}_{condition}-epo.fif"
     epochs_clean.save(output_path, overwrite=True)
@@ -486,7 +489,7 @@ def preprocess_subject(subject_id, data_dir, beta_plausibility_bound=1.0,
                         blink_amplitude_threshold_uv=1000, blink_duration_threshold=100,
                         heog_min_duration_threshold=20, heog_max_duration_threshold=150,
                         heog_baseline_removal=True, heog_baseline_window_sec=1.0,
-                        apply_heog_correction=False,
+                        apply_heog_correction=False, derivatives_dirname="derivatives",
                         z_threshold=0.2, trim_pct=2, epoch_duration=5.0, autoreject_cv=10):
     """
     Run the full preprocessing pipeline for one subject, both conditions (restEC, restEO).
@@ -497,32 +500,35 @@ def preprocess_subject(subject_id, data_dir, beta_plausibility_bound=1.0,
     beta_plausibility_bound (float): Plausibility bound for Gratton regression beta. Default 1.0.
     blink_amplitude_threshold_uv (float): Amplitude guard threshold, in µV. Default 1000.
     blink_duration_threshold (float): Minimum duration guard threshold for VEOG, in ms.
-    Default 100 (blink-appropriate; not saccade-appropriate, hence the separate HEOG
-    bounds below).
+        Default 100 (blink-appropriate; not saccade-appropriate, hence the separate HEOG
+        bounds below).
     heog_min_duration_threshold (float): Minimum duration guard threshold for HEOG only, in
-    ms. Default 20, just below the literature saccade floor (~30 ms), avoiding
-    over-exclusion of genuinely fast saccades - see docs/preprocessing_notes.md.
+        ms. Default 20, just below the literature saccade floor (~30 ms), avoiding
+        over-exclusion of genuinely fast saccades - see docs/preprocessing_notes.md.
     heog_max_duration_threshold (float): Maximum duration guard threshold for HEOG only, in
-    ms. Default 150 (tightened from an earlier 200 ms fix), close to the literature
-    saccade ceiling (~120 ms) with a modest margin - see docs/preprocessing_notes.md.
+        ms. Default 150 (tightened from an earlier 200 ms fix), close to the literature
+        saccade ceiling (~120 ms) with a modest margin - see docs/preprocessing_notes.md.
+    heog_baseline_removal (bool): Whether to apply rolling-median baseline-drift removal
+        to HEOG before artefact detection. Default True - addresses HEOG's step-like
+        non-stationary baseline, see docs/preprocessing_notes.md. VEOG is unaffected.
+    heog_baseline_window_sec (float): Window length for HEOG baseline removal, in seconds.
+        Default 1.0, per the validated window-size sweep - see remove_baseline_drift.
     apply_heog_correction (bool): Whether to apply Gratton regression correction using HEOG.
-    Default False. HEOG segment detection and guards still run regardless (segment counts
-    are logged for later sensitivity analysis), but the correction itself is skipped by
-    default given documented low confidence in HEOG "valid" segments being genuine
-    saccades rather than residual drift/noise (see docs/preprocessing_notes.md). VEOG
-    correction is always applied - this flag affects HEOG only. NOTE: if enabled, 
-    gratton_regression regresses against the original (non-detrended) HEOG signal, 
-    not the detrended version used for segment detection - this inconsistency is not
-    yet resolved; revisit before ever setting this to True.
+        Default False. HEOG segment detection and guards still run regardless (segment counts
+        are logged for later sensitivity analysis), but the correction itself is skipped by
+        default given documented low confidence in HEOG "valid" segments being genuine
+        saccades rather than residual drift/noise (see docs/preprocessing_notes.md). VEOG
+        correction is always applied - this flag affects HEOG only. NOTE: if enabled,
+        gratton_regression regresses against the original (non-detrended) HEOG signal,
+        not the detrended version used for segment detection - this inconsistency is not
+        yet resolved.
+    derivatives_dirname (str): Output subfolder name, passed to save_epochs. Default
+        "derivatives". Used to keep parallel-variant runs (e.g. HEOG correction on/off)
+        in separate output locations.
     z_threshold (float): Z-score threshold for artefact detection. Default 0.2.
     trim_pct (float): Percentage trimmed for reference mean/std in artefact detection. Default 2.
     epoch_duration (float): Epoch length in seconds. Default 5.0.
     autoreject_cv (int): Number of CV folds for autoreject's parameter search. Default 10.
-    heog_baseline_removal (bool): Whether to apply rolling-median baseline-drift removal
-    to HEOG before artefact detection. Default True - addresses HEOG's step-like
-    non-stationary baseline, see docs/preprocessing_notes.md. VEOG is unaffected.
-    heog_baseline_window_sec (float): Window length for HEOG baseline removal, in seconds.
-    Default 1.0, per the validated window-size sweep - see remove_baseline_drift.
 
     Returns:
     results (dict): keyed by condition, each value a dict with 'status', 'n_epochs_before',
@@ -575,7 +581,8 @@ def preprocess_subject(subject_id, data_dir, beta_plausibility_bound=1.0,
             emg_audit_df['subject_id'] = subject_id
             emg_audit_df['condition'] = condition
 
-            output_path = save_epochs(epochs_clean, subject_id, condition, data_dir)
+            output_path = save_epochs(epochs_clean, subject_id, condition, data_dir,
+                                       derivatives_dirname=derivatives_dirname)
 
             results[condition] = {
                 'status': 'ok',

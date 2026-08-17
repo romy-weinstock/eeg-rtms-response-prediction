@@ -15,11 +15,12 @@ Completed and validated on pilot subject:
   against the single-channel proof-of-concept (exact coefficient match, Fp1) and against expected
   scalp physiology (mean coefficient by channel shows a monotonic frontal-to-posterior gradient,
   strongest at Fp1/Fp2, near zero at occipital sites).
-- `correct_EOG` (HEOG): artefact detection, amplitude-plausibility guard, and duration-plausibility
-  guard validated on the pilot subject (see deviations below for a detection fix required before
-  guards could be applied meaningfully). **Since revised** - see "Small-batch stress test" section
-  below: a maximum-duration bound was added after batch testing found the original guard
-  insufficient, and HEOG correction confidence remains an open item.
+-`correct_EOG` (HEOG): artefact detection and guards validated on the pilot subject (see
+  deviations below for the initial detection fix). **Since substantially revised** - see
+  "Small-batch stress test" and "HEOG baseline-drift removal" sections below: duration bounds
+  were tightened, then baseline-drift removal was added and validated via a window-size sweep.
+  HEOG correction confidence is meaningfully improved but remains not fully resolved -
+  `apply_heog_correction` defaults to `False`.
 - Epoching: 5-second, non-overlapping windows (see rationale below).
 - Artefact rejection: `autoreject` adopted and benchmarked against known artefacts; EMG bandpower
   supplement built and validated as a standing audit (see below).
@@ -263,11 +264,46 @@ no other parameter changed between runs - plausibly explained by the HEOG fix al
 segments were corrected, slightly changing the EEG signal `autoreject` evaluates, but not
 confirmed. Noted as an observed difference, not investigated further.
 
-**Updated open items**:
-- HEOG correction confidence (above) - unresolved.
+## HEOG baseline-drift removal: validated and integrated
+
+**Summary of what was done**: initial duration-bound tightening (100-200ms) reduced HEOG
+candidates but most survivors still showed step-shift baseline behaviour rather than isolated
+events. Literature review confirmed this is expected physiology for genuine saccades (baseline
+relocates with gaze position), not necessarily noise - but the detection method's z-score
+threshold, computed against a recording-wide reference, cannot distinguish "baseline moved" from
+"genuine transient event." Two detrending approaches were tested to address this before
+detection: polynomial fitting (failed - dominated by outlier artefacts even with clipping,
+stayed flat against visible drift) and rolling-median baseline subtraction (worked - visually
+confirmed to track baseline wobble and level shifts). A window-size sweep (0.5-2.0s) found 1.0s
+best: shorter windows introduced new spurious detections, longer windows barely differed from no
+detrending. At 1.0s, visual inspection of all 13 surviving segments found roughly half showing
+the expected isolated-deflection signature, versus ~1 in 9 without detrending.
+
+**Integrated into the pipeline**: `remove_baseline_drift` (rolling median, `window_sec=1.0`) is
+now applied to HEOG before artefact detection in `preprocess_subject`
+(`heog_baseline_removal=True` by default). VEOG is unaffected.
+
+**Still open**: roughly half of post-detrending segments show trend/step character rather than a
+clean isolated event. `apply_heog_correction` remains `False` by default - detection is
+meaningfully improved but not yet reliable enough to trust for correction. A known inconsistency
+is also flagged in code: if `apply_heog_correction` is ever enabled, `gratton_regression`
+currently regresses against the original (non-detrended) HEOG signal, not the detrended version
+used for detection - unresolved, documented in the function's docstring.
+
+**Verification below**: re-running the orchestrator on `sub-88047245` to confirm the updated
+`preprocess_subject` reflects this integration correctly (expect `heog_n_candidates`/
+`heog_n_valid` matching the 1.0s sweep result: 73/13 for restEC).
+
+**Updated open items** :
+- HEOG correction confidence: baseline-drift removal integrated and validated via window-size
+  sweep, improving detection meaningfully (see above). Roughly half of segments still show
+  step/trend character rather than isolated events - `apply_heog_correction` remains `False`
+  pending further work.
+- Known inconsistency (documented in code): if HEOG correction is ever enabled, regression
+  would run against non-detrended HEOG data, not the detrended version used for detection -
+  unresolved.
 - `blink_amplitude_threshold_uv=1000` and `trim_pct=2` (VEOG/general) remain
-  empirically-fit-to-pilot-subject in origin, though now exercised across 7 subjects without
-  evidence of failure.
-- Orchestrator's per-condition `try/except` has never been triggered by a real failure (0
-  errors across 14 runs) - untested exception-handling path.
+  empirically-fit-to-pilot-subject in origin, exercised across 7 subjects without evidence of
+  failure.
+- Orchestrator's per-condition `try/except` has never been triggered by a real failure.
 - Full cohort (163 subjects) not yet run - only 7 tested to date.

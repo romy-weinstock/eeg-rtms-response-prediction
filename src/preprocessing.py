@@ -140,6 +140,45 @@ def apply_filters(raw, hpfreq = 0.5, lpfreq = 100, notchfreq = 50, Q = 100):
     raw = raw.apply_function(_filter_block, picks=picks, Fs=Fs, hpfreq=hpfreq, lpfreq=lpfreq, notchfreq=notchfreq, Q=Q, channel_wise=False)
     return raw
 
+## Remove slow baseline drift from a channel via rolling median, prior to
+## artefact detection - addresses HEOG's step-like non-stationary baseline (see
+## docs/preprocessing_notes.md, "HEOG detection revisited")
+def remove_baseline_drift(channel, Fs, window_sec=1.0):
+    """
+    Estimate and subtract a local baseline trend using a rolling median, to prevent
+    step-like baseline relocation (e.g. sustained gaze shifts in HEOG) from being
+    conflated with transient artefacts during z-score-based detection.
+
+    A rolling median (not a global polynomial fit) is used because HEOG baseline
+    drift was found to move in discrete, step-like shifts rather than a smooth
+    continuous trend - a global polynomial cannot track this (confirmed empirically:
+    an 8th-order polynomial fit stayed flat near zero across a window with visible
+    +/-40uV level shifts). Median filtering is also naturally robust to large brief
+    artefacts (e.g. the end-of-recording non-ocular spikes documented elsewhere),
+    without needing separate amplitude clipping.
+
+    Parameters:
+    channel (np.ndarray): 1D channel data, in volts.
+    Fs (float): Sampling frequency.
+    window_sec (float): Rolling median window length, in seconds. Default 1.0 -
+    validated via a sweep (0.5-2.0s): shorter windows (0.5s) introduced new
+    spurious detections from median-filter staircase artefacts; longer windows
+    (1.5-2.0s) barely differed from no detrending. At 1.0s, visual inspection
+    found roughly half of surviving segments showed the expected isolated-
+    deflection signature, versus ~1 in 9 without detrending - see
+    docs/preprocessing_notes.md.
+
+    Returns:
+    detrended (np.ndarray): Channel data with the rolling median baseline subtracted.
+    baseline (np.ndarray): The estimated baseline itself, for inspection/plotting.
+    """
+    window_samples = int(window_sec * Fs)
+    if window_samples % 2 == 0:
+        window_samples += 1  # medfilt requires an odd kernel size
+    baseline = scipy.signal.medfilt(channel, kernel_size=window_samples)
+    detrended = channel - baseline
+    return detrended, baseline
+
 ## Detect artefacts function
 def detect_artefact_segments(channel, Fs, z_threshold=0.2, padding=0.3, trim_pct=2):
     """
@@ -445,7 +484,9 @@ def save_epochs(epochs_clean, subject_id, condition, data_dir):
 ## Orchestrator: run the full pipeline for one subject, both conditions
 def preprocess_subject(subject_id, data_dir, beta_plausibility_bound=1.0,
                         blink_amplitude_threshold_uv=1000, blink_duration_threshold=100,
-                        heog_max_duration_threshold=200,
+                        heog_min_duration_threshold=20, heog_max_duration_threshold=150,
+                        heog_baseline_removal=True, heog_baseline_window_sec=1.0,
+                        apply_heog_correction=False,
                         z_threshold=0.2, trim_pct=2, epoch_duration=5.0, autoreject_cv=10):
     """
     Run the full preprocessing pipeline for one subject, both conditions (restEC, restEO).
@@ -455,20 +496,39 @@ def preprocess_subject(subject_id, data_dir, beta_plausibility_bound=1.0,
     data_dir (str or Path): The directory where the BDF files are stored.
     beta_plausibility_bound (float): Plausibility bound for Gratton regression beta. Default 1.0.
     blink_amplitude_threshold_uv (float): Amplitude guard threshold, in µV. Default 1000.
-    blink_duration_threshold (float): Minimum duration guard threshold, in ms. Default 100.
-    heog_max_duration_threshold (float or None): Maximum duration guard threshold for HEOG
-        only, in ms. Default 200, addressing HEOG drift periods incorrectly passing as valid
-        segments - see docs/preprocessing_notes.md. Not applied to VEOG (no evidence of the
-        same issue there).
+    blink_duration_threshold (float): Minimum duration guard threshold for VEOG, in ms.
+    Default 100 (blink-appropriate; not saccade-appropriate, hence the separate HEOG
+    bounds below).
+    heog_min_duration_threshold (float): Minimum duration guard threshold for HEOG only, in
+    ms. Default 20, just below the literature saccade floor (~30 ms), avoiding
+    over-exclusion of genuinely fast saccades - see docs/preprocessing_notes.md.
+    heog_max_duration_threshold (float): Maximum duration guard threshold for HEOG only, in
+    ms. Default 150 (tightened from an earlier 200 ms fix), close to the literature
+    saccade ceiling (~120 ms) with a modest margin - see docs/preprocessing_notes.md.
+    apply_heog_correction (bool): Whether to apply Gratton regression correction using HEOG.
+    Default False. HEOG segment detection and guards still run regardless (segment counts
+    are logged for later sensitivity analysis), but the correction itself is skipped by
+    default given documented low confidence in HEOG "valid" segments being genuine
+    saccades rather than residual drift/noise (see docs/preprocessing_notes.md). VEOG
+    correction is always applied - this flag affects HEOG only. NOTE: if enabled, 
+    gratton_regression regresses against the original (non-detrended) HEOG signal, 
+    not the detrended version used for segment detection - this inconsistency is not
+    yet resolved; revisit before ever setting this to True.
     z_threshold (float): Z-score threshold for artefact detection. Default 0.2.
     trim_pct (float): Percentage trimmed for reference mean/std in artefact detection. Default 2.
     epoch_duration (float): Epoch length in seconds. Default 5.0.
     autoreject_cv (int): Number of CV folds for autoreject's parameter search. Default 10.
+    heog_baseline_removal (bool): Whether to apply rolling-median baseline-drift removal
+    to HEOG before artefact detection. Default True - addresses HEOG's step-like
+    non-stationary baseline, see docs/preprocessing_notes.md. VEOG is unaffected.
+    heog_baseline_window_sec (float): Window length for HEOG baseline removal, in seconds.
+    Default 1.0, per the validated window-size sweep - see remove_baseline_drift.
 
     Returns:
     results (dict): keyed by condition, each value a dict with 'status', 'n_epochs_before',
         'n_epochs_after', 'emg_audit_df', 'output_path', 'autoreject_consensus',
-        'autoreject_n_interpolate', 'autoreject_extreme' (or 'error' if failed).
+        'autoreject_n_interpolate', 'autoreject_extreme', 'heog_n_candidates',
+        'heog_n_valid', 'heog_correction_applied' (or 'error' if failed).
     """
     results = {}
     for condition in ['restEC', 'restEO']:
@@ -479,13 +539,31 @@ def preprocess_subject(subject_id, data_dir, beta_plausibility_bound=1.0,
             raw = apply_filters(raw)
 
             Fs = raw.info['sfreq']
+            heog_n_candidates, heog_n_valid = None, None
+
             for eog_channel in ['VEOG', 'HEOG']:
                 ch_data = raw.get_data(picks=[eog_channel])[0]
+                if eog_channel == 'HEOG' and heog_baseline_removal:
+                    ch_data, _ = remove_baseline_drift(ch_data, Fs, window_sec=heog_baseline_window_sec)
                 segments = detect_artefact_segments(ch_data, Fs, z_threshold=z_threshold, trim_pct=trim_pct)
                 valid_amp, _ = amplitude_guard(ch_data, segments, threshold=blink_amplitude_threshold_uv)
-                max_dur = heog_max_duration_threshold if eog_channel == 'HEOG' else None
-                valid_dur, _ = duration_guard(valid_amp, Fs, blink_duration_threshold=blink_duration_threshold,
+
+                if eog_channel == 'HEOG':
+                    min_dur = heog_min_duration_threshold
+                    max_dur = heog_max_duration_threshold
+                else:
+                    min_dur = blink_duration_threshold
+                    max_dur = None
+
+                valid_dur, _ = duration_guard(valid_amp, Fs, blink_duration_threshold=min_dur,
                                                max_duration_threshold=max_dur)
+
+                if eog_channel == 'HEOG':
+                    heog_n_candidates = len(segments)
+                    heog_n_valid = len(valid_dur)
+                    if not apply_heog_correction:
+                        continue
+
                 raw, _ = gratton_regression(raw, eog_channel, valid_dur, beta_plausibility_bound=beta_plausibility_bound)
 
             epochs = epoch_raw(raw, epoch_duration=epoch_duration)
@@ -507,7 +585,10 @@ def preprocess_subject(subject_id, data_dir, beta_plausibility_bound=1.0,
                 'output_path': output_path,
                 'autoreject_consensus': qc_info['consensus'],
                 'autoreject_n_interpolate': qc_info['n_interpolate'],
-                'autoreject_extreme': qc_info['consensus'] >= 0.9
+                'autoreject_extreme': qc_info['consensus'] >= 0.9,
+                'heog_n_candidates': heog_n_candidates,
+                'heog_n_valid': heog_n_valid,
+                'heog_correction_applied': apply_heog_correction
             }
         except Exception as e:
             results[condition] = {'status': 'error', 'error': str(e)}

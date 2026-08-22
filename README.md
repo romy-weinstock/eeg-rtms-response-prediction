@@ -44,7 +44,7 @@ The original plan was to use the TDBRAIN authors' published preprocessing pipeli
 
 To address this, preprocessing for this project reimplements the documented methodology from van Dijk et al. (2022) natively in MNE-Python, rather than using the original code directly. Specifically, EOG artifact correction uses the regression-based method published by Gratton et al. (1983), matching the authors' documented approach, the ICA-based artifact removal explored in the MNE fundamentals notebook (`00_mne_fundamentals_tutorial.ipynb`) was tool-learning, not the method used in the final pipeline.
 
-## Preprocessing status (17/08/2026) - complete
+## Preprocessing status (17/08/26) - complete
 
 Pipeline order (matching authors' dataset class methods): bipolarEOG -> demean -> apply_filters -> correct_EOG -> epoching -> artefact rejection.
 
@@ -72,3 +72,25 @@ Two prechecks were run first (`notebooks/05_modelling_prechecks.ipynb`) to verif
 Age is regressed out of features within training folds only, at the modelling stage, consistent across all arms.
 
 **Open item:** an unresolved discrepancy was found between this cohort's rTMS protocol composition and the published TDBRAIN data descriptor (van Dijk et al., 2022, Table 2) - see `docs/modelling_decisions.md`, Decision 5, for detail. Flagged as a candidate for direct follow-up with Brainclinics if it becomes material to results.
+
+## Feature extraction status (22/08/26)
+
+Pipeline: `load_subject_epochs -> get_subject_qc -> compute_band_power`, tied
+together by `extract_subject_features` (orchestrator, mirrors
+`preprocess_subject`'s structure).
+
+**Band power extraction built and validated** on pilot subject
+`sub-87999321` (restEC, heog_off). Refactored from
+`notebooks/06_feature_extraction_pilot.ipynb` into `src/features.py`.
+130 columns (26 channels x 5 bands, Chang et al. 2025 boundaries), PSD via
+Welch's method, values in uV^2/Hz. Refactor validated against notebook
+output to 15 decimal places. Orchestrator tested against one success case
+and one deliberate failure case, confirming clean NaN-filling when rows
+are concatenated.
+
+For full implementation detail (bugs caught, unit conversion, channel
+mismatch, boundary fix), see
+[`docs/feature_extraction_notes.md`](docs/feature_extraction_notes.md).
+
+Full-cohort run (restEC, heog_off) and remaining feature families (PLI,
+coherence, PLV, Kuramoto) are next.

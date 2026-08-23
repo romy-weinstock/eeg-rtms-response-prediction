@@ -73,24 +73,43 @@ Age is regressed out of features within training folds only, at the modelling st
 
 **Open item:** an unresolved discrepancy was found between this cohort's rTMS protocol composition and the published TDBRAIN data descriptor (van Dijk et al., 2022, Table 2) - see `docs/modelling_decisions.md`, Decision 5, for detail. Flagged as a candidate for direct follow-up with Brainclinics if it becomes material to results.
 
-## Feature extraction status (22/08/26)
+## Feature extraction status (23/08/26)
 
-Pipeline: `load_subject_epochs -> get_subject_qc -> compute_band_power`, tied
-together by `extract_subject_features` (orchestrator, mirrors
-`preprocess_subject`'s structure).
+Pipeline: `load_subject_epochs -> get_subject_qc -> compute_band_power ->
+compute_pli`, tied together by `extract_subject_features` (orchestrator,
+mirrors `preprocess_subject`'s structure).
 
-**Band power extraction built and validated** on pilot subject
-`sub-87999321` (restEC, heog_off). Refactored from
-`notebooks/06_feature_extraction_pilot.ipynb` into `src/features.py`.
-130 columns (26 channels x 5 bands, Chang et al. 2025 boundaries), PSD via
-Welch's method, values in uV^2/Hz. Refactor validated against notebook
-output to 15 decimal places. Orchestrator tested against one success case
-and one deliberate failure case, confirming clean NaN-filling when rows
-are concatenated.
+**Band power** built and validated on pilot subject `sub-87999321`
+(restEC, heog_off) in `notebooks/06_feature_extraction_pilot.ipynb`,
+refactored into `src/features.py`. 130 columns (26 channels x 5 bands,
+Chang et al. 2025 boundaries), PSD via Welch's method, values in
+uV^2/Hz. Refactor validated against notebook output to 15 decimal places.
+
+**Band power, full cohort** run in
+`notebooks/07_feature_extraction_full_cohort.ipynb`: 160/160 subjects
+succeeded (0 failures), assembled to a 160x146 feature matrix, QC'd
+(missingness explained; 143/160 subjects show posterior > frontal alpha,
+consistent with the pilot subject and expected topography), and saved as
+`data/features/bandpower_full_cohort.parquet`. Ratio-power scope decided:
+frontal asymmetry excluded per the existing Decision 5 citation (van der
+Vinne et al., 2017); theta/beta excluded (ADHD literature only, no
+MDD/rTMS grounding); relative power deferred, derivable post-hoc from the
+saved matrix at low cost.
+
+**PLI** (primary connectivity metric) built and validated on the pilot
+subject and a 6-subject batch, using
+`mne_connectivity.spectral_connectivity_epochs`. 1,625 columns (325
+upper-triangle channel pairs x 5 bands). Refactor validated exactly
+against notebook output (0/1625 mismatches); batch check (6 subjects,
+varying epoch counts) passed with 0 failures, all values in [0,1], no
+NaNs.
+
+Orchestrator tested throughout against one success case and one
+deliberate failure case, confirming clean NaN-filling when rows are
+concatenated.
 
 For full implementation detail (bugs caught, unit conversion, channel
-mismatch, boundary fix), see
+mismatch, tool choices, and reasoning), see
 [`docs/feature_extraction_notes.md`](docs/feature_extraction_notes.md).
 
-Full-cohort run (restEC, heog_off) and remaining feature families (PLI,
-coherence, PLV, Kuramoto) are next.
+Full-cohort PLI, coherence, PLV, and Kuramoto are next.

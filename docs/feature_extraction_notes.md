@@ -52,6 +52,76 @@ one deliberate failure (nonexistent subject ID). `pd.DataFrame([...])`
 correctly NaN-fills missing columns via pandas' default behavior - no
 custom handling needed.
 
+**Full-cohort run.** Built in
+`notebooks/07_feature_extraction_full_cohort.ipynb`. Subject list built
+by globbing `derivatives_heog_off/` for `sub-*_restEC-epo.fif`
+(`.rglob`), not from the cohort spreadsheet or folder presence alone -
+guarantees the list matches what's actually loadable. 160/163 found,
+matching the 3 known-missing-BDF subjects. Loop: log-and-continue, 0
+failures. Assembled to (160, 146). Missingness: only `preprocessing_error`
+null (expected - populated only on failure). Distribution: 143/160
+(89.4%) show posterior > frontal alpha; the 17 non-matching subjects show
+no meaningful clustering on `n_epochs_after` or `autoreject_extreme`
+versus cohort baseline. Saved as parquet, not CSV, for exact dtype
+round-tripping on repeated reload (`pyarrow` installed via pip; `conda
+install` failed on a solver conflict with the pinned `python=3.11` env).
+Reload-verified via `.equals()`.
+
+**Ratio-power scope.** Three distinct things get called "ratio power":
+relative power (band/total, a normalization), cross-band ratios like
+theta/beta (ADHD literature only, no MDD/rTMS grounding - excluded), and
+frontal asymmetry. Asymmetry excluded per Decision 5's existing citation
+of van der Vinne et al. (2017)'s meta-analysis - a stronger source than
+what was initially considered for inclusion. Relative power deferred, not
+excluded: cheap to derive post-hoc from the saved absolute-power matrix,
+no reason to compute before needed.
+
+## PLI
+
+Built and validated (pilot + 6-subject batch) in
+`notebooks/06_feature_extraction_pilot.ipynb`, refactored into
+`src/features.py`.
+
+**Tool choice: `mne_connectivity.spectral_connectivity_epochs` (v0.8.1),
+not a manual Hilbert-transform build.** Validated library implementation
+judged lower-risk than re-deriving circular phase statistics from scratch
+(phase-wrapping edge cases are easy to get subtly wrong).
+
+**Pair structure: upper-triangle only.** 325 of 676 possible pairs (26
+choose 2), via `itertools.combinations`. A full matrix would introduce
+perfectly collinear duplicate columns - actively harmful for the planned
+regularized linear models and nested feature selection, not just wasted
+storage. `indices` must be passed explicitly - left at default (`None`),
+the function returns the full n^2 matrix (confirmed from the docstring).
+
+**Band scope: all 5 bands**, matching band power, per Decision 5's
+compute-once-curate-later pattern. Alpha-band PLI has direct stability
+evidence (Dominicus et al., 2025); other bands lack that grounding - to
+flag explicitly when the primary arm's curated pool is finalized.
+
+**Epoch aggregation.** Handled internally via cross-spectral density
+accumulated across epochs (multitaper, 7 DPSS windows) - not a literal
+per-epoch-then-mean loop as originally sketched during planning;
+mathematically equivalent, stated precisely here to avoid overclaiming
+the mechanism. Concatenating epochs into one continuous trace was
+considered and rejected - epochs aren't contiguous (autoreject drops
+some), so concatenation would introduce artificial phase discontinuities
+at epoch boundaries.
+
+**Refactor validation.** `compute_pli` reproduces all 1625
+notebook-derived values exactly (0/1625 mismatches).
+
+**Orchestrator.** Updated to call `compute_pli` alongside
+`compute_band_power`. Batch-tested on 6 subjects, varying epoch counts:
+6/6 succeeded, all values within [0,1], no NaNs.
+
+**[0,1] range assertion added inside `compute_pli`**, not just checked ad
+hoc - unlike band power, PLI has a hard mathematical property worth
+enforcing every call. Same reasoning as preprocessing's beta-plausibility
+guard: cheaper to fail loudly at computation than catch it downstream.
+
 ## Deferred
 
-PLI, coherence, PLV, Kuramoto. Full-cohort run not yet started.
+Full-cohort PLI, coherence, PLV. Kuramoto. `requirements.txt`/
+`environment.yml` (currently empty; most dependencies are conda-installed
+with local build-cache paths, not usable via plain `pip freeze`).

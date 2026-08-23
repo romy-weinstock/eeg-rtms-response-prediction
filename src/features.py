@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import mne
 from src.preprocessing import find_repo_root
+from itertools import combinations
+from mne_connectivity import spectral_connectivity_epochs
 
 ## Load subject epochs function 
 def load_subject_epochs(subject_id, condition, variant, data_dir): 
@@ -81,7 +83,49 @@ def compute_band_power(epochs, bands):
     assert not any(np.isnan(v) for v in band_power.values()), "NaN found in band_power"
     return band_power
 
+
+## Compute PLI function
+
+def compute_pli(epochs, bands):
+    """
+    Compute PLI (phase lag index) connectivity from epochs.
+
+    Parameters:
+    epochs (mne.Epochs): The preprocessed epochs
+    bands (dict): band_name: (low, high) specifying band boundaries
+
+    Returns:
+    pli_results (dict): {channel_a}_{channel_b}_{band_name}_pli: PLI value,
+    one entry per upper-triangle channel pair per band.
+    """
+    picks = mne.pick_types(epochs.info, eeg=True)
+    ch_names = [epochs.ch_names[i] for i in picks]
+    pairs = list(combinations(range(len(ch_names)), 2))
+    seeds = [i[0] for i in pairs]
+    targets = [j[1] for j in pairs]
+    indices = (seeds, targets)
+    fmin = tuple(low for (low, high) in bands.values())
+    fmax = tuple(high for (low, high) in bands.values())
+    con = spectral_connectivity_epochs(
+        data=epochs,
+        method='pli',
+        indices=indices,
+        fmin=fmin,
+        fmax=fmax,
+        faverage=True,
+        sfreq=epochs.info['sfreq'],
+        )
+    con_data = con.get_data()
+    pli_results = {}
+    for p, (i, j) in enumerate(pairs):
+        for b, band_name in enumerate(bands):
+            pli_results[f"{ch_names[i]}_{ch_names[j]}_{band_name}_pli"] = con_data[p, b]
+    assert all(0 <= v <= 1 for v in pli_results.values()), "PLI value outside [0,1] found"
+    assert not any(np.isnan(v) for v in pli_results.values()), "NaN found in pli_results"
+    return pli_results
+
 ## Orchestrator: extract subject features
+
 def extract_subject_features(subject_id, condition, variant, data_dir, qc_log, bands):
     """
     Run the full feature extraction pipeline for one subject, condition, and
@@ -103,15 +147,17 @@ def extract_subject_features(subject_id, condition, variant, data_dir, qc_log, b
         - status column: reason ('ok' on success, description of failure otherwise)
         - QC columns: all keys from qc_info (n_epochs_after, autoreject_extreme, etc.)
         - feature columns: all keys from compute_band_power (Fp1_delta_power, etc.)
-    On failure, QC and feature columns are absent from qc_info/band_power (since
-    they were never computed) - the caller should expect this row to have fewer
-    keys than a successful row, or NaN-fill afterward if a fixed column set across
-    all rows is needed at concatenation time.
+          and all keys from compute_pli (Fp1_Fp2_delta_pli, etc.)
+    On failure, QC and feature columns are absent from qc_info/band_power/pli
+    (since they were never computed) - the caller should expect this row to have
+    fewer keys than a successful row, or NaN-fill afterward if a fixed column set
+    across all rows is needed at concatenation time.
     """
     try:
         epochs = load_subject_epochs(subject_id, condition, variant, data_dir)
         qc_info = get_subject_qc(subject_id, condition, variant, qc_log)
         band_power = compute_band_power(epochs, bands)
+        pli = compute_pli(epochs, bands)
 
         qc_info_renamed = {
             (f"preprocessing_{k}" if k in ("status", "error") else k): v
@@ -124,6 +170,7 @@ def extract_subject_features(subject_id, condition, variant, data_dir, qc_log, b
             "reason": "ok",
             **qc_info_renamed,
             **band_power,
+            **pli,
             }
     except Exception as e:
         results = {

@@ -124,6 +124,50 @@ def compute_pli(epochs, bands):
     assert not any(np.isnan(v) for v in pli_results.values()), "NaN found in pli_results"
     return pli_results
 
+## Function to compute coherence and PLV 
+def compute_coherence_plv(epochs, bands):
+    """
+    Compute PLV and coherence connectivity measures from epochs.
+
+    Parameters:
+    epochs (mne.Epochs): The preprocessed epochs
+    bands (dict): band_name: (low, high) specifying band boundaries
+
+    Returns:
+    coherence_plv_results (dict): {channel_a}_{channel_b}_{band_name}_{metric}:
+    value, one entry per upper-triangle channel pair per band per metric
+    (coh, plv).
+    """
+    picks = mne.pick_types(epochs.info, eeg=True)
+    ch_names = [epochs.ch_names[i] for i in picks]
+    pairs = list(combinations(range(len(ch_names)), 2))
+    seeds = [i[0] for i in pairs]
+    targets = [j[1] for j in pairs]
+    indices = (seeds, targets)
+    fmin = tuple(low for (low, high) in bands.values())
+    fmax = tuple(high for (low, high) in bands.values())
+    con_multi = spectral_connectivity_epochs(
+        data=epochs,
+        method=['coh', 'plv'],
+        indices=indices,
+        fmin=fmin,
+        fmax=fmax,
+        faverage=True,
+        sfreq=epochs.info['sfreq'],
+        )
+    coherence_plv_results = {}
+    for con in con_multi:
+        metric_name = con.method
+        con_data = con.get_data()
+        for p, (i, j) in enumerate(pairs):
+            for b, band_name in enumerate(bands):
+                key = f"{ch_names[i]}_{ch_names[j]}_{band_name}_{metric_name}"
+                coherence_plv_results[key] = con_data[p, b]
+    assert not any(np.isnan(v) for v in coherence_plv_results.values()), "NaN found in results"
+    assert all(0 <= v <= 1 for v in coherence_plv_results.values()), "Value outside [0,1] found"
+    return coherence_plv_results
+
+
 ## Orchestrator: extract subject features
 
 def extract_subject_features(subject_id, condition, variant, data_dir, qc_log, bands):
@@ -146,18 +190,20 @@ def extract_subject_features(subject_id, condition, variant, data_dir, qc_log, b
         - identity columns: subject_id, condition, variant
         - status column: reason ('ok' on success, description of failure otherwise)
         - QC columns: all keys from qc_info (n_epochs_after, autoreject_extreme, etc.)
-        - feature columns: all keys from compute_band_power (Fp1_delta_power, etc.)
-          and all keys from compute_pli (Fp1_Fp2_delta_pli, etc.)
-    On failure, QC and feature columns are absent from qc_info/band_power/pli
-    (since they were never computed) - the caller should expect this row to have
-    fewer keys than a successful row, or NaN-fill afterward if a fixed column set
-    across all rows is needed at concatenation time.
+        - feature columns: all keys from compute_band_power (Fp1_delta_power, etc.),
+          compute_pli (Fp1_Fp2_delta_pli, etc.), and compute_coherence_plv
+          (Fp1_Fp2_delta_coh, Fp1_Fp2_delta_plv, etc.)
+    On failure, QC and feature columns are absent from qc_info/band_power/pli/
+    coherence_plv (since they were never computed) - the caller should expect this
+    row to have fewer keys than a successful row, or NaN-fill afterward if a fixed
+    column set across all rows is needed at concatenation time.
     """
     try:
         epochs = load_subject_epochs(subject_id, condition, variant, data_dir)
         qc_info = get_subject_qc(subject_id, condition, variant, qc_log)
         band_power = compute_band_power(epochs, bands)
         pli = compute_pli(epochs, bands)
+        coherence_plv = compute_coherence_plv(epochs, bands)
 
         qc_info_renamed = {
             (f"preprocessing_{k}" if k in ("status", "error") else k): v
@@ -171,6 +217,7 @@ def extract_subject_features(subject_id, condition, variant, data_dir, qc_log, b
             **qc_info_renamed,
             **band_power,
             **pli,
+            **coherence_plv,
             }
     except Exception as e:
         results = {

@@ -83,45 +83,71 @@ Built and validated (pilot + 6-subject batch) in
 `src/features.py`.
 
 **Tool choice: `mne_connectivity.spectral_connectivity_epochs` (v0.8.1),
-not a manual Hilbert-transform build.** Validated library implementation
-judged lower-risk than re-deriving circular phase statistics from scratch
-(phase-wrapping edge cases are easy to get subtly wrong).
+not manual Hilbert-transform.** Validated library judged lower-risk than
+re-deriving circular phase statistics.
 
-**Pair structure: upper-triangle only.** 325 of 676 possible pairs (26
-choose 2), via `itertools.combinations`. A full matrix would introduce
-perfectly collinear duplicate columns - actively harmful for the planned
-regularized linear models and nested feature selection, not just wasted
-storage. `indices` must be passed explicitly - left at default (`None`),
-the function returns the full n^2 matrix (confirmed from the docstring).
+**Pair structure: upper-triangle only** (325/676), via
+`itertools.combinations` - avoids collinear duplicate columns. `indices`
+must be passed explicitly, or the function returns the full n^2 matrix.
 
-**Band scope: all 5 bands**, matching band power, per Decision 5's
-compute-once-curate-later pattern. Alpha-band PLI has direct stability
-evidence (Dominicus et al., 2025); other bands lack that grounding - to
-flag explicitly when the primary arm's curated pool is finalized.
+**Band scope: all 5 bands**, per Decision 5's compute-once-curate-later
+pattern. Alpha has direct stability evidence (Dominicus et al., 2025);
+other bands don't.
 
-**Epoch aggregation.** Handled internally via cross-spectral density
-accumulated across epochs (multitaper, 7 DPSS windows) - not a literal
-per-epoch-then-mean loop as originally sketched during planning;
-mathematically equivalent, stated precisely here to avoid overclaiming
-the mechanism. Concatenating epochs into one continuous trace was
-considered and rejected - epochs aren't contiguous (autoreject drops
-some), so concatenation would introduce artificial phase discontinuities
-at epoch boundaries.
+**Epoch aggregation.** Internal, via cross-spectral density accumulated
+across epochs - not a literal per-epoch-then-mean loop as originally
+planned; mathematically equivalent, stated precisely to avoid
+overclaiming.
 
 **Refactor validation.** `compute_pli` reproduces all 1625
 notebook-derived values exactly (0/1625 mismatches).
 
 **Orchestrator.** Updated to call `compute_pli` alongside
 `compute_band_power`. Batch-tested on 6 subjects, varying epoch counts:
-6/6 succeeded, all values within [0,1], no NaNs.
+6/6 succeeded, all values within [0,1], no NaNs. **[0,1] range assertion
+added inside `compute_pli` itself**, not just checked ad hoc - hard
+mathematical property worth enforcing every call, same reasoning as
+preprocessing's beta-plausibility guard.
 
-**[0,1] range assertion added inside `compute_pli`**, not just checked ad
-hoc - unlike band power, PLI has a hard mathematical property worth
-enforcing every call. Same reasoning as preprocessing's beta-plausibility
-guard: cheaper to fail loudly at computation than catch it downstream.
+**Full-cohort run.** Extended `07` (no longer band-power-only). 160/160,
+0 failures. Assembled to (160, 1771). Missingness/range clean, same
+pattern as band power. A supplementary near-vs-far spatial check was
+explored but returned an ambiguous result (alpha flat, beta weak) and
+wasn't adopted as validation evidence - the refactor check already
+provides stronger evidence than this could.
+
+## Coherence and PLV
+
+Built and validated (pilot + 6-subject batch) in
+`notebooks/06_feature_extraction_pilot.ipynb`, refactored into
+`src/features.py`. Full-cohort run pending.
+
+**Single-call tooling: `spectral_connectivity_epochs(method=['coh',
+'plv'], ...)`.** Computes both metrics together, returning a list of
+`SpectralConnectivity` objects in the order passed - confirmed via
+`.method` on each object, not assumed from the docstring. PLI kept
+separate to avoid recomputing an already-validated metric.
+
+**Same scope as PLI**: all 5 bands, upper-triangle pairs only.
+
+**Illustrative check (not validation evidence).** Fp1-Fp2, alpha, pilot
+subject: coherence 0.947, PLV 0.993, vs. PLI 0.137 for the same pair/band.
+Demonstrates Decision 2's rationale directly - coherence/PLV lack PLI's
+volume-conduction correction and inflate for adjacent electrodes; PLI
+correctly suppresses it. Single-subject, single-pair - illustrative only.
+
+**Refactor validation.** `compute_coherence_plv` spot-checked against
+notebook output (3250/3250 columns present, correct keys); full equality
+check across every value, matching PLI's 0/1625 standard, still to be
+run.
+
+**Orchestrator.** Updated to call `compute_coherence_plv` alongside
+`compute_band_power` and `compute_pli`. Batch-tested on 6 subjects: 6/6
+succeeded, all 3250 coh/plv values within [0,1], no NaNs.
 
 ## Deferred
 
-Full-cohort PLI, coherence, PLV. Kuramoto. `requirements.txt`/
-`environment.yml` (currently empty; most dependencies are conda-installed
-with local build-cache paths, not usable via plain `pip freeze`).
+Full-cohort coherence/PLV. Full equality check for `compute_coherence_plv`
+refactor. Kuramoto. `requirements.txt`/`environment.yml` (currently empty;
+most dependencies are conda-installed with local build-cache paths, not
+usable via plain `pip freeze`).

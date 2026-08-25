@@ -136,18 +136,21 @@ Demonstrates Decision 2's rationale directly - coherence/PLV lack PLI's
 volume-conduction correction and inflate for adjacent electrodes; PLI
 correctly suppresses it. Single-subject, single-pair - illustrative only.
 
-**Refactor validation.** `compute_coherence_plv` spot-checked against
-notebook output (3250/3250 columns present, correct keys); full equality
-check across every value, matching PLI's 0/1625 standard, still to be
-run.
+**Refactor validation.** `compute_coherence_plv` validated against an
+independent manual derivation (`spectral_connectivity_epochs(method=['coh',
+'plv'], ...)` called directly in the notebook). Full equality check across
+all 3250 columns: 0 mismatches, matching PLI's 0/1625 standard.
 
 **Orchestrator.** Updated to call `compute_coherence_plv` alongside
 `compute_band_power` and `compute_pli`. Batch-tested on 6 subjects: 6/6
 succeeded, all 3250 coh/plv values within [0,1], no NaNs.
 
+**Full-cohort run.** Extended `07` notebook. 160/160,
+0 failures. Assembled to (160, 5021). Missingness/range clean, same
+pattern as for band power and pli. 
+
 ## Deferred
 
-Full-cohort coherence/PLV. Full equality check for `compute_coherence_plv`
-refactor. Kuramoto. `requirements.txt`/`environment.yml` (currently empty;
+ Kuramoto. `requirements.txt`/`environment.yml` (currently empty;
 most dependencies are conda-installed with local build-cache paths, not
 usable via plain `pip freeze`).

@@ -73,35 +73,18 @@ Age is regressed out of features within training folds only, at the modelling st
 
 **Open item:** an unresolved discrepancy was found between this cohort's rTMS protocol composition and the published TDBRAIN data descriptor (van Dijk et al., 2022, Table 2) - see `docs/modelling_decisions.md`, Decision 5, for detail. Flagged as a candidate for direct follow-up with Brainclinics if it becomes material to results.
 
-## Feature extraction status (24/08/26)
+## Feature extraction status (25/08/26)
 
-Pipeline: `load_subject_epochs -> get_subject_qc -> compute_band_power ->
-compute_pli -> compute_coherence_plv`, tied together by
-`extract_subject_features`.
+Pipeline: `load_subject_epochs -> get_subject_qc -> compute_band_power -> compute_pli -> compute_coherence_plv -> compute_kuramoto`, tied together by `extract_subject_features`.
 
-**Band power**: built and validated on pilot subject `sub-87999321` in
-`06_feature_extraction_pilot.ipynb`, refactored into `src/features.py`
-(130 columns, Welch PSD, uV^2/Hz, matched to 15 decimal places). Full
-cohort (`07`): 160/160 succeeded, 160x146 matrix, QC'd (143/160 show
-posterior > frontal alpha), saved as
-`data/features/bandpower_full_cohort.parquet`. Ratio-power scope decided:
-asymmetry excluded (Decision 5), theta/beta excluded (no MDD/rTMS
-grounding), relative power deferred.
+**Band power**: built and validated on pilot subject `sub-87999321` in `06_feature_extraction_pilot.ipynb`, refactored into `src/features.py` (130 columns, Welch PSD, uV^2/Hz, matched to 15 decimal places). Full cohort (`07`): 160/160 succeeded, 160x146 matrix, QC'd (143/160 show posterior > frontal alpha), saved as `data/features/bandpower_full_cohort.parquet`. Ratio-power scope decided: asymmetry excluded (Decision 5), theta/beta excluded (no MDD/rTMS grounding), relative power deferred.
 
-**PLI** (primary connectivity metric): built and validated (pilot + 6-
-subject batch) via `mne_connectivity.spectral_connectivity_epochs`.
-1,625 columns (325 pairs x 5 bands), exact refactor match (0/1625
-mismatches). Full cohort: 160/160 succeeded, 160x1771 matrix, saved as
-`data/features/full_cohort_features.parquet`.
+**PLI** (primary connectivity metric): built and validated (pilot + 6- subject batch) via `mne_connectivity spectral_connectivity_epochs`. 1,625 columns (325 pairs x 5 bands), exact refactor match (0/1625 mismatches). Full cohort: 160/160 succeeded, 160x1771 matrix, saved as `data/features/full_cohort_features.parquet`.
 
-**Coherence and PLV** (secondary metrics): built and validated (pilot +
-batch), computed together in one `spectral_connectivity_epochs` call.
-3,250 columns. Pilot spot check (Fp1-Fp2, alpha: coherence 0.947, PLV
-0.993, vs. PLI 0.137) illustrates the volume-conduction sensitivity
-these metrics are compared against PLI to assess. Full-cohort run
-pending.
+**Coherence and PLV** (secondary metrics): built and validated (pilot + batch + full cohort), computed together in one `spectral_connectivity_epochs` call. 3,250 columns, exact refactor match (0/3250 mismatches). Pilot illustration (Fp1-Fp2, alpha: coherence 0.947, PLV 0.993, vs. PLI 0.137) shows the volume-conduction sensitivity these metrics are compared against PLI to assess. Full cohort: 160/160 succeeded, matrix extended to 160x5021.
 
-Full detail (bugs caught, tool choices, reasoning):
-[`docs/feature_extraction_notes.md`](docs/feature_extraction_notes.md).
+**Kuramoto order parameter and metastability**: built and validated (pilot + batch + full cohort). Band-pass filter, Hilbert transform, order parameter (mean of R(t)) and metastability (std of R(t)) per epoch, per band; global across all 26 channels (Decision 6). 10 columns (5 bands x 2 metrics), exact refactor match (0/10 mismatches). Filter edge-effect check (delta worst case, gamma best case, all retained epochs) found no systematic distortion; no trimming applied. Full cohort: 160/160 succeeded, matrix extended to 160x5031, saved as `data/features/full_cohort_features.parquet`.
 
-Full-cohort coherence/PLV and Kuramoto are next.
+Full detail (bugs caught, tool choices, reasoning):[`docs/feature_extraction_notes.md`](docs/feature_extraction_notes.md).
+
+IAF-proximity and secondary-arm feature bank assembly are next.

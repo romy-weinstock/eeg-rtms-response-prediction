@@ -167,6 +167,42 @@ def compute_coherence_plv(epochs, bands):
     assert all(0 <= v <= 1 for v in coherence_plv_results.values()), "Value outside [0,1] found"
     return coherence_plv_results
 
+## Kuramoto function 
+def compute_kuramoto(epochs, bands):
+    """
+    Compute Kuramoto order parameter and metastability from epochs.
+
+    Parameters:
+    epochs (mne.Epochs): The preprocessed epochs
+    bands (dict): band_name: (low, high) specifying band boundaries
+
+    Returns:
+    kuramoto_results (dict): {band_name}_order: order parameter,
+    {band_name}_metastability: metastability, one pair of entries per band.
+    """
+    picks = mne.pick_types(epochs.info, eeg=True)
+    kuramoto_results = {}
+
+    for band_name, (low, high) in bands.items():
+        epochs_filt = epochs.copy().filter(l_freq=low, h_freq=high, picks=picks, verbose=False)
+        epochs_filt.apply_hilbert(picks=picks, envelope=False)
+        analytic = epochs_filt.get_data(picks=picks)  # (n_epochs, n_channels, n_times), complex
+        theta = np.angle(analytic)
+
+        order_per_epoch = []
+        metastability_per_epoch = []
+        for ep in range(theta.shape[0]):
+            R_t = np.abs(np.mean(np.exp(1j * theta[ep]), axis=0))
+            order_per_epoch.append(R_t.mean())
+            metastability_per_epoch.append(R_t.std())
+
+        kuramoto_results[f"{band_name}_order"] = np.mean(order_per_epoch)
+        kuramoto_results[f"{band_name}_metastability"] = np.mean(metastability_per_epoch)
+
+    assert not any(np.isnan(v) for v in kuramoto_results.values()), "NaN found in kuramoto_results"
+    order_keys = [k for k in kuramoto_results if k.endswith('_order')]
+    assert all(0 <= kuramoto_results[k] <= 1 for k in order_keys), "Order parameter outside [0,1] found"
+    return kuramoto_results
 
 ## Orchestrator: extract subject features
 
@@ -191,12 +227,14 @@ def extract_subject_features(subject_id, condition, variant, data_dir, qc_log, b
         - status column: reason ('ok' on success, description of failure otherwise)
         - QC columns: all keys from qc_info (n_epochs_after, autoreject_extreme, etc.)
         - feature columns: all keys from compute_band_power (Fp1_delta_power, etc.),
-          compute_pli (Fp1_Fp2_delta_pli, etc.), and compute_coherence_plv
-          (Fp1_Fp2_delta_coh, Fp1_Fp2_delta_plv, etc.)
+          compute_pli (Fp1_Fp2_delta_pli, etc.), compute_coherence_plv
+          (Fp1_Fp2_delta_coh, Fp1_Fp2_delta_plv, etc.), and compute_kuramoto
+          (delta_order, delta_metastability, etc.)
     On failure, QC and feature columns are absent from qc_info/band_power/pli/
-    coherence_plv (since they were never computed) - the caller should expect this
-    row to have fewer keys than a successful row, or NaN-fill afterward if a fixed
-    column set across all rows is needed at concatenation time.
+    coherence_plv/kuramoto (since they were never computed) - the caller should
+    expect this row to have fewer keys than a successful row, or NaN-fill
+    afterward if a fixed column set across all rows is needed at concatenation
+    time.
     """
     try:
         epochs = load_subject_epochs(subject_id, condition, variant, data_dir)
@@ -204,6 +242,7 @@ def extract_subject_features(subject_id, condition, variant, data_dir, qc_log, b
         band_power = compute_band_power(epochs, bands)
         pli = compute_pli(epochs, bands)
         coherence_plv = compute_coherence_plv(epochs, bands)
+        kuramoto = compute_kuramoto(epochs, bands)
 
         qc_info_renamed = {
             (f"preprocessing_{k}" if k in ("status", "error") else k): v
@@ -218,6 +257,7 @@ def extract_subject_features(subject_id, condition, variant, data_dir, qc_log, b
             **band_power,
             **pli,
             **coherence_plv,
+            **kuramoto,
             }
     except Exception as e:
         results = {

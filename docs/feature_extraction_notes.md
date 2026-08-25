@@ -150,7 +150,6 @@ succeeded, all 3250 coh/plv values within [0,1], no NaNs.
 pattern as for band power and pli. 
 
 ## Deferred
-
  Kuramoto. `requirements.txt`/`environment.yml` (currently empty;
 most dependencies are conda-installed with local build-cache paths, not
 usable via plain `pip freeze`).

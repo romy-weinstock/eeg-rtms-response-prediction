@@ -64,7 +64,25 @@ Both arms are pre-specified together, before either is run, and both are reporte
 
 ## 6. Kuramoto synchrony metrics
 
-Order parameter and metastability, computed per epoch using the same aggregation approach as the spectral and connectivity features, as a secondary comparison against the spectral/connectivity baseline. This matches the project's stated framing: does synchrony add predictive value beyond standard features, not synchrony as a primary claim on its own. Full coupling-matrix fitting remains explicitly out of scope, given sample size constraints. Exact channel grouping and frequency band are to be finalized when this feature family is implemented.
+Order parameter and metastability, computed per epoch using the same aggregation approach as the spectral and connectivity features, as a secondary comparison against the spectral/connectivity baseline. This matches the project's stated framing: does synchrony add predictive value beyond standard features, not synchrony as a primary claim on its own. Full coupling-matrix fitting remains explicitly out of scope, given sample size constraints.
+
+**Channel grouping: global (all 26 channels), not sub-grouped.** Three candidate grouping approaches were identified in the literature, none of which transposes to this project's data without introducing an ungrounded methodological step. Bapat, Pathak, and Banerjee (2024) derive channel groups from the TMS-evoked potential itself (sorting channels by deviation from the mean at the timepoint of peak Global Field Power) - inapplicable here, since there is no evoked stimulus in resting-state pre-treatment recordings to derive a grouping from. Escrichs et al. (2024) use a continuous spatial distance-decay kernel across a 1000-region fMRI parcellation - inapplicable given this project's 26-electrode spatial resolution. Schmidt et al. (2015) group nodes by predefined anatomical/functional modules and by structural rich-club/hub membership, but this is a simulation study on a 219-node DWI-derived connectome, not empirical EEG; mapping its module or hub-selection logic onto scalp electrodes would require a new methodological justification this project does not yet have. Given no grounded grouping method transfers, global whole-cohort KOP is computed as the primary Kuramoto feature; regional subgrouping is deferred as an unvalidated exploratory extension for the secondary arm, consistent with how IAF-proximity's limited evidence base was scoped down rather than extended past its support (Decision 5).
+
+**Frequency bands: all five, with no assumed alpha primacy.** Scope follows the same completeness logic used for PLI and coherence/PLV (Decision 2). Unlike PLI, alpha does not carry a specific stability or mechanistic grounding for Kuramoto/metastability in the literature reviewed here — if anything, the one directly relevant EEG finding
+points away from alpha: Bapat et al. (2024) report the TMS-pulse-related decrease in the Kuramoto order parameter was significant in delta, theta, gamma, and the broadband condition, but not in alpha (p = 0.73)
+and only borderline in beta (p = 0.06). This is a TMS-perturbation result, not a resting-state predictive finding, so it is not treated as evidence that alpha is unimportant for this project's task — only as a reason not to import PLI's alpha-primacy framing into this feature family without separate justification.
+
+**Motivating framing: baseline resting-state metastability predicting treatment response, following Escrichs et al. (2024)**
+
+Escrichs et al. (2024) found that baseline (pre-treatment) turbulence, the standard deviation over time of the local Kuramoto order parameter, aggregated across the whole brain at each of three spatial scales, rather than computed per individual node,  predicted SSRI responder status above chance (ROC-AUC 0.70 ± 0.078, p = 0.02) after 8 weeks of treatment, alongside two related measures (information cascade and information transfer) in the same classifier. Separately, at the node level, non-responders showed significantly lower metastability than both responders and healthy controls across most of 1,000
+brain regions tested, a group-difference finding, not part of the predictive model. The whole-brain turbulence measure, rather than the node-level one, is the closer precedent to this project's task shape: a single aggregated baseline metastability-type value predicting treatment response in MDD.
+
+The precedent comes with a substantial modality gap, stated explicitly rather than glossed over: Escrichs et al. use fMRI/BOLD dynamics at a 1000-region spatial resolution and SSRI response, not EEG at 26 channels and rTMS response. Bapat et al. (2024) is EEG, which is closer in modality, but its task doesn't transfer: it measures the *change* in metastability following a single TMS pulse, and this project's pre-treatment resting recordings contain no pulse for that change to be measured relative to. Bapat et al. is therefore used only as a source for computation mechanics (band-filtering, Hilbert
+transform, order parameter, standard deviation), not as evidence for why baseline metastability should predict treatment response — that predictive rationale comes from Escrichs et al. alone, despite its modality mismatch.
+
+**Computation mechanics, adapted from Bapat et al. (2024):** band-pass filter to each of the five bands, extract instantaneous phase via Hilbert transform, compute the Kuramoto order parameter at each timepoint across all 26 channels, and take the standard deviation of the order parameter across all timepoints within an epoch as that epoch's metastability value. Bapat et al.'s sliding-window (50 ms) and pulse-relative baseline structure is not adopted, since both exist to track change relative to a stimulation event this project's data does not contain; metastability here is a single per-epoch summary value, aggregated across retained epochs by the same mean-aggregation approach used for band power, PLI, coherence, and PLV (Decision 3).
+
+Exact implementation (e.g. filter design, edge-effect handling in the Hilbert transform) to be finalized and validated on the pilot subject before refactoring into `src/features.py`.
 
 ## 7. Age confound handling
 
@@ -78,11 +96,15 @@ Bailey, N. W., Hoy, K. E., Rogasch, N. C., Thomson, R. H., McQueen, S., Elliot, 
 
 Bailey, N. W., Krepel, N., Carpenter, L. L., Fitzgerald, P. B., Daskalakis, Z. J., Tendolkar, I., Farzan, F., Downar, J., Wilson, A., Blumberger, D. M., Vila-Rodriguez, F., & Arns, M. (2020). Resting EEG theta connectivity and alpha power to predict repetitive transcranial magnetic stimulation response in depression: A non-replication from the ICON-DB consortium. *Clinical Neurophysiology*. https://doi.org/10.1016/j.clinph.2020.10.018
 
+Bapat, R., Pathak, A., & Banerjee, A. (2024). Metastability indexes global changes in the dynamic working point of the brain following brain stimulation. *Frontiers in Neurorobotics, 18*, 1336438. https://doi.org/10.3389/fnbot.2024.1336438
+
 Chang, C.-H., Sack, A. T., Chu, C.-S., & Chang, H.-A. (2025). *EEG-based prediction of rTMS treatment response in depression: Nonlinear features and machine learning with minimal electrode*. medRxiv. https://doi.org/10.1101/2025.10.30.25339032
 
 Corlier, J., Carpenter, L. L., Wilson, A. C., Tirrell, E., Gobin, A. P., Kavanaugh, B., Aaronson, S., & Leuchter, A. F. (2019). The relationship between individual alpha peak frequency and clinical outcome with repetitive transcranial magnetic stimulation (rTMS) treatment of major depressive disorder (MDD). Brain Stimulation, 12(6), 1572–1578. https://doi.org/10.1016/j.brs.2019.07.018
 
 Duan, W., Chen, X., Wang, Y.-J., Zhao, W., Yuan, H., & Lei, X. (2021). Reproducibility of power spectrum, functional connectivity and network construction in resting-state EEG. *Journal of Neuroscience Methods, 348*, Article 108985. https://doi.org/10.1016/j.jneumeth.2020.108985
+
+Escrichs, A., Sanz Perl, Y., Fisher, P. M., Martínez-Molina, N., G-Guzman, E., Frokjaer, V. G., Kringelbach, M. L., Knudsen, G. M., & Deco, G. (2024). Whole-brain turbulent dynamics predict responsiveness to pharmacological treatment in major depressive disorder. *Molecular Psychiatry, 30*, 1069-1079. https://doi.org/10.1038/s41380-024-02690-7
 
 Ledoit, O., & Wolf, M. (2004). A well-conditioned estimator for large-dimensional covariance matrices. *Journal of Multivariate Analysis, 88*(2), 365-411.
 
@@ -91,6 +113,8 @@ Lotfi, R., Shahsavani, D., & Arashi, M. (2022). Classification in high dimension
 Newson, J. J., & Thiagarajan, T. C. (2019). EEG frequency bands in psychiatric disorders: A review of resting state studies. *Frontiers in Human Neuroscience, 12*, Article 521. https://doi.org/10.3389/fnhum.2018.00521
 
 Roelofs, C. L., Krepel, N., Corlier, J., Carpenter, L. L., Fitzgerald, P. B., Daskalakis, Z. J., Tendolkar, I., Wilson, A., Downar, J., Bailey, N. W., Blumberger, D. M., Vila-Rodriguez, F., Leuchter, A. F., & Arns, M. (2021). Individual alpha frequency proximity associated with repetitive transcranial magnetic stimulation outcome: An independent replication study from the ICON-DB consortium. *Clinical Neurophysiology, 132*(2), 643-649. https://doi.org/10.1016/j.clinph.2020.10.017
+
+Schmidt, R., LaFleur, K. J. R., de Reus, M. A., van den Berg, L. H., & van den Heuvel, M. P. (2015). Kuramoto model simulation of neural hubs and dynamic synchrony in the human cerebral connectome. *BMC Neuroscience, 16*, 54. https://doi.org/10.1186/s12868-015-0193-z
 
 Shim, M., Lee, S.-H., & Hwang, H.-J. (2021). Inflated prediction accuracy of neuropsychiatric biomarkers caused by data leakage in feature selection. *Scientific Reports, 11*, Article 7980.
 

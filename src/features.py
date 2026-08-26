@@ -267,3 +267,42 @@ def extract_subject_features(subject_id, condition, variant, data_dir, qc_log, b
             "reason": str(e),
         }
     return results
+
+
+## Compute IAF function (not integrated in the orchestrator - to run only on protocol 1 subjects)
+def compute_iaf(epochs, alpha_window=(7, 13), channel='F3'):
+    """
+    Compute individual alpha frequency (IAF) and IAF-prox from epochs.
+
+    Parameters:
+    epochs (mne.Epochs): The preprocessed epochs
+    alpha_window (tuple): (low, high) frequency bounds for peak-picking,
+    following Roelofs et al. (2021)'s 7-13 Hz window - deliberately
+    distinct from this project's primary 8-13 Hz alpha band (Decision 2),
+    used here for replication fidelity.
+    channel (str): single electrode to compute IAF at, matched to the
+    10 Hz left-DLPFC stimulation site (F3), following Roelofs et al. (2021).
+
+    Returns:
+    iaf_results (dict): {'iaf': peak frequency in Hz,
+    'iaf_prox': absolute distance from 10 Hz}
+    """
+    spectrum = epochs.compute_psd(method='welch', verbose=False)
+    freqs = spectrum.freqs
+    psd_data = spectrum.get_data()
+
+    ch_idx = spectrum.ch_names.index(channel)
+    low, high = alpha_window
+    alpha_mask = (freqs >= low) & (freqs <= high)
+
+    psd_ch = psd_data[:, ch_idx, :].mean(axis=0)
+    psd_ch_alpha = psd_ch[alpha_mask]
+    freqs_alpha = freqs[alpha_mask]
+
+    iaf = freqs_alpha[np.argmax(psd_ch_alpha)]
+    iaf_prox = abs(iaf - 10)
+
+    iaf_results = {"iaf": iaf, "iaf_prox": iaf_prox}
+    assert not any(np.isnan(v) for v in iaf_results.values()), "NaN found in iaf_results"
+    assert alpha_window[0] <= iaf_results["iaf"] <= alpha_window[1], "IAF outside search window"
+    return iaf_results

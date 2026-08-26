@@ -73,7 +73,7 @@ Age is regressed out of features within training folds only, at the modelling st
 
 **Open item:** an unresolved discrepancy was found between this cohort's rTMS protocol composition and the published TDBRAIN data descriptor (van Dijk et al., 2022, Table 2) - see `docs/modelling_decisions.md`, Decision 5, for detail. Flagged as a candidate for direct follow-up with Brainclinics if it becomes material to results.
 
-## Feature extraction status (25/08/26)
+## Feature extraction status (26/08/26)
 
 Pipeline: `load_subject_epochs -> get_subject_qc -> compute_band_power -> compute_pli -> compute_coherence_plv -> compute_kuramoto`, tied together by `extract_subject_features`.
 
@@ -85,6 +85,6 @@ Pipeline: `load_subject_epochs -> get_subject_qc -> compute_band_power -> comput
 
 **Kuramoto order parameter and metastability**: built and validated (pilot + batch + full cohort). Band-pass filter, Hilbert transform, order parameter (mean of R(t)) and metastability (std of R(t)) per epoch, per band; global across all 26 channels (Decision 6). 10 columns (5 bands x 2 metrics), exact refactor match (0/10 mismatches). Filter edge-effect check (delta worst case, gamma best case, all retained epochs) found no systematic distortion; no trimming applied. Full cohort: 160/160 succeeded, matrix extended to 160x5031, saved as `data/features/full_cohort_features.parquet`.
 
-Full detail (bugs caught, tool choices, reasoning):[`docs/feature_extraction_notes.md`](docs/feature_extraction_notes.md).
+**IAF-proximity** (supplementary, protocol-1 only, n=42): built and validated (manual derivation, exact refactor match) in `06`, extracted standalone in `07` - not part of the primary or secondary feature bank. 7-13 Hz peak-picking at F3, matched to Roelofs et al. (2021)'s method. Peak-identifiability check found no basis for their low-alpha exclusion criterion in this sample; all 42 subjects retained. Saved as `data/features/iaf_protocol1.parquet`. Association test deferred to modelling stage. 
 
-IAF-proximity and secondary-arm feature bank assembly are next.
+Full detail (bugs caught, tool choices, reasoning):[`docs/feature_extraction_notes.md`](docs/feature_extraction_notes.md).

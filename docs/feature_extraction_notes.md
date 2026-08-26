@@ -70,7 +70,24 @@ Built and validated (pilot + 6-subject batch + full cohort) in `notebooks/06_fea
 
 **Full-cohort run.** Extended `07` notebook. 160/160 succeeded (confirmed via loop failure count, `preprocessing_status`, and missingness pattern), 160x5031 final shape, all Kuramoto values within expected bounds, no NaNs. Saved to `full_cohort_features.parquet`, reload-verified.
 
+## IAF-proximity (supplementary, protocol-1 only)
+
+Built and validated (manual derivation + refactor) in `notebooks/06_feature_extraction_pilot.ipynb`, refactored into
+`src/features.py`, extracted for all 42 protocol-1 subjects in `notebooks/07_feature_extraction_full_cohort.ipynb`. Not part of the primary or secondary feature bank; a standalone supplementary analysis per Decision 5.
+
+**Method**: Welch PSD (consistent with this project's reading of Roelofs et al. (2021)'s "FFT" method, Decision 2), peak frequency within 7-13 Hz (not this project's primary 8-13 Hz alpha band - a deliberate exception for replication fidelity) at a single electrode, F3, matched to the 10 Hz left-DLPFC stimulation site. IAF-prox = |IAF - 10|.
+
+**Documented deviations from Roelofs et al. (2021)**: PSD computed from already-epoched, already-QC'd ~5s epochs rather than their continuous 4s/50%-overlap segmentation.
+
+**Peak identifiability check.** Roelofs et al. excluded ~12.6% of their sample (n~175) for lacking a dominant alpha peak, using a 1.5 Z-score cutoff on peak power, justified by a visible bimodal distribution in their sample. Checked whether this project's n=42 sample shows the same pattern: peak power distribution is unimodal and right-skewed, with no distinguishable low-power subgroup; 0/42 subjects fall below their -1.5 Z threshold. The empirical basis for their exclusion criterion is not
+present in this sample, so no subjects were excluded; all 42 retained.
+
+**Extraction.** Standalone loop over the 42 protocol-1 subject IDs, not integrated into `extract_subject_features` (which assumes uniform extraction across all 160 subjects). 42/42 succeeded, no NaNs, all IAF
+values within [7,13]. Saved to `data/features/iaf_protocol1.parquet`, reload-verified.
+
+**Association test** (Decision 5, Decision 5 addendum): deferred to the modelling stage (Day 10), not run here. Planned: logistic regression (IAF-prox + age) as primary, Mann-Whitney U (IAF-prox only) as a companion check, given the protocol-1 subgroup's binary responder outcome (17 non-responders / 25 responders) doesn't map onto Roelofs et al.'s continuous-outcome correlation design.
+
 ## Deferred
-``requirements.txt`/`environment.yml` (currently empty;
+`requirements.txt`/`environment.yml` (currently empty;
 most dependencies are conda-installed with local build-cache paths, not
 usable via plain `pip freeze`).

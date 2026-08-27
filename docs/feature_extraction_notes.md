@@ -87,7 +87,13 @@ values within [7,13]. Saved to `data/features/iaf_protocol1.parquet`, reload-ver
 
 **Association test** (Decision 5, Decision 5 addendum): deferred to the modelling stage (Day 10), not run here. Planned: logistic regression (IAF-prox + age) as primary, Mann-Whitney U (IAF-prox only) as a companion check, given the protocol-1 subgroup's binary responder outcome (17 non-responders / 25 responders) doesn't map onto Roelofs et al.'s continuous-outcome correlation design.
 
-## Deferred
-`requirements.txt`/`environment.yml` (currently empty;
-most dependencies are conda-installed with local build-cache paths, not
-usable via plain `pip freeze`).
+## Full feature matrix assembly and QC
+
+**Assembly.** No merge required. `extract_subject_features` was extended incrementally through this notebook (band power -> +PLI -> +coherence/PLV -> +Kuramoto), and each extension re-ran extraction across the full cohort rather than appending to prior output. `full_cohort_features.parquet` therefore already contains all four families; `bandpower_full_cohort.parquet` is a superseded pre-PLI snapshot, not a separate piece needing integration. 
+
+**`feature_cols` vs. identity/QC columns.** Defined an explicit 16-column identity/QC list (`subject_id`, `preprocessing_status`, `autoreject_consensus`, etc.) once, so downstream variance/CV checks run against the 5015 genuine feature columns rather than being contaminated by constant bookkeeping columns (`preprocessing_status`, `preprocessing_error`) that would trivially flag as zero-variance for uninteresting reasons.
+
+**Matrix-level QC, run in addition to (not instead of) each family's own per-family QC:**
+- Row-wise missingness: 1 NaN/subject uniformly, all `preprocessing_error` (expected, null-by-design on success).
+- Exact-zero variance: 0/5015 columns.
+- CV (std/mean) near-zero check: no natural gap in the distribution (checked via zoomed histogram, CV < 0.1) — lowest 30 CV columns are exclusively PLV, exclusively spatially-adjacent electrode pairs. Extends Decision 2's single-subject illustrative volume-conduction comparison (Fp1-Fp2, coherence 0.947/PLV 0.993 vs. PLI 0.137) to a full-cohort, multi-pair confirmation. No exclusions applied — effect is graded, not binary; any down-weighting or exclusion is a modelling-stage call, not extraction-stage.

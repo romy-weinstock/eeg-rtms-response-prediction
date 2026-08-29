@@ -73,7 +73,7 @@ Age is regressed out of features within training folds only, at the modelling st
 
 **Open item:** an unresolved discrepancy was found between this cohort's rTMS protocol composition and the published TDBRAIN data descriptor (van Dijk et al., 2022, Table 2) - see `docs/modelling_decisions.md`, Decision 5, for detail. Flagged as a candidate for direct follow-up with Brainclinics if it becomes material to results.
 
-## Feature extraction status (27/08/26)
+## Feature extraction status (27/08/26) - complete
 
 Pipeline: `load_subject_epochs -> get_subject_qc -> compute_band_power -> compute_pli -> compute_coherence_plv -> compute_kuramoto`, tied together by `extract_subject_features`.
 
@@ -85,12 +85,22 @@ Pipeline: `load_subject_epochs -> get_subject_qc -> compute_band_power -> comput
 
 **Kuramoto order parameter and metastability**: built and validated (pilot + batch + full cohort). Band-pass filter, Hilbert transform, order parameter (mean of R(t)) and metastability (std of R(t)) per epoch, per band; global across all 26 channels (Decision 6). 10 columns (5 bands x 2 metrics), exact refactor match (0/10 mismatches). Filter edge-effect check (delta worst case, gamma best case, all retained epochs) found no systematic distortion; no trimming applied. Full cohort: 160/160 succeeded, matrix extended to 160x5031, saved as `data/features/full_cohort_features.parquet`.
 
-**IAF-proximity** (supplementary, protocol-1 only, n=42): built and validated (manual derivation, exact refactor match) in `06`, extracted standalone in `07` - not part of the primary or secondary feature bank. 7-13 Hz peak-picking at F3, matched to Roelofs et al. (2021)'s method. Peak-identifiability check found no basis for their low-alpha exclusion criterion in this sample; all 42 subjects retained. Saved as `data/features/iaf_protocol1.parquet`. Association test deferred to modelling stage. 
+**IAF-proximity** (supplementary, protocol-1 only, n=42): built and validated (manual derivation, exact refactor match) in `06`, extracted standalone in `07` - not part of the primary or secondary feature bank. 7-13 Hz peak-picking at F3, matched to Roelofs et al. (2021)'s method. Peak-identifiability check found no basis for their low-alpha exclusion criterion in this sample; all 42 subjects retained. Saved as `data/features/iaf_protocol1.parquet`. Association test deferred to modelling stage.
 
-### Feature matrix assembly and QC
+### Feature matrix assembly and QC - complete
 
 `full_cohort_features.parquet` (160 x 5031) is confirmed as the complete secondary-arm feature bank — band power, PLI, coherence, PLV, and Kuramoto in one matrix. IAF-proximity remains a standalone supplementary file (protocol-1 subgroup, n=42).
 
 Matrix-level QC (distinct from each feature family's own extraction-time validation) found: no unexpected missingness, no zero-variance columns, and no natural low-CV cutoff — the lowest-variance columns are consistently PLV values for spatially adjacent electrode pairs, reinforcing the volume-conduction rationale behind choosing PLI as the primary connectivity measure.
 
 Full detail (bugs caught, tool choices, reasoning):[`docs/feature_extraction_notes.md`](docs/feature_extraction_notes.md).
+
+## Modelling: primary-arm revision and Arm 1 results (29/08/26)
+
+Primary pool revised to a single construct: FAA (raw F4−F3, matching Provaznikova et al., 2025) is now the sole primary-arm feature. Bailey et al.'s theta connectivity/alpha power construct was excluded — well-specified (14 named electrode pairs) but already failed independent multi-site replication (N≈193) — and moved to a new supplementary replication check instead. Citation correction: the construct's source is Bailey et al. (2019), not 2018; its non-replication is Bailey et al. (2021), not 2020.
+
+A fourth classifier (unregularized logistic regression) was added across every arm as a diagnostic control. All four now use class-balanced weighting, adopted after an unweighted run showed majority-class bias (specificity as low as 0.15). Balanced accuracy is now the primary metric; sensitivity, specificity, and PPV are also reported.
+
+Evaluation design expanded from three arms to six, plus two supplementary tests (IAF-proximity; a new Bailey construct replication check), all pre-specified together. Full detail and citations: [`docs/modelling_decisions.md`](docs/modelling_decisions.md).
+
+**Arm 1 results** ([`notebooks/08_arm1_primary_pool.ipynb`](notebooks/08_arm1_primary_pool.ipynb)): FAA alone, nested CV (5 outer / 3 inner folds) + 1,000-permutation testing. Elastic-net clears significance (balanced accuracy 0.587, p=0.016); the other three classifiers sit at the boundary (p≈0.05) and don't. No winner selected, per design — weak, borderline evidence overall, below Provaznikova et al.'s reported strength (AUC 0.75-0.81 vs. 0.639 here). The fold-scoped age transformer (`AgeDeconfounder`) and nested-CV harness (`run_nested_cv`), validated here, move to `src/modelling.py` for reuse in Arms 2-6.

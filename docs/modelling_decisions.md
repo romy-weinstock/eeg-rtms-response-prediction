@@ -56,7 +56,13 @@ The exclusion of tree ensembles from this set is grounded in a direct comparator
 
 Standard LDA's requirement to invert a feature covariance matrix breaks down once feature count approaches sample count. Ledoit-Wolf shrinkage (Ledoit & Wolf, 2004) addresses this directly, and Lotfi, Shahsavani, and Arashi (2022) found it outperforms standard LDA specifically in high-dimensional classification settings comparable to this project's feature-to-sample ratio. Bayesian logistic regression with a regularizing prior performs the same shrinkage function as elastic-net's penalty term, making it a small-sample-appropriate method by design.
 
+**Note.** Bayesian logistic regression is implemented as L2-penalized logistic regression (penalty='l2'), the MAP estimate under a Gaussian coefficient prior - mathematically equivalent to the shrinkage rationale already stated, without a separate posterior-sampling dependency. This is a point estimate, not a full posterior; no credible intervals are reported for this classifier.
+
 **Unregularized logistic regression** is a fourth model reported in every arm, not a fourth candidate under the same justification as the other three — it is a diagnostic control, testing whether the other three models' regularization is doing measurable work at each arm's feature-to-sample ratio. At low ratios (Arm 1, p=1) it should perform comparably to the shrinkage models, since neither Ledoit-Wolf's shrinkage intensity nor elastic-net's penalty should do much work when p≪n. At high ratios (Arm 4) it should degrade, giving a direct, computed illustration of the instability Chang et al. (2025) report, rather than only a citation of it.
+
+Class-balanced weighting is applied across all four classifiers, in every arm. This cohort's responder/non-responder split (94/69 overall) is uneven enough that unweighted models measurably default toward predicting the majority class: an unweighted Arm 1 run showed sensitivity of 0.77–0.87 against specificity of only 0.15–0.34, with balanced accuracy near chance (0.51–0.52) despite raw accuracy looking more favorable (0.57–0.59) — a known artifact of scoring an imbalance-blind objective with a metric that doesn't correct for it. This was decided from that diagnostic evidence, before any permutation testing was run, to avoid the same post-hoc-tuning risk the six-arm pre-specification and the bounded literature search were built to prevent. Implementation: class_weight='balanced' for all three logistic variants; LinearDiscriminantAnalysis has no class_weight parameter, so priors=[0.5, 0.5] is used instead, overriding sklearn's default of estimating priors from the training fold's empirical class frequencies — the same majority-class-driven behavior this correction targets.
+
+Given class-balanced weighting, balanced accuracy is primary, not raw accuracy as stated in earlier drafts of this decision — raw accuracy's chance level shifts with class balance (58.1% here, from always predicting "responder"), which makes it liable to misread as signal when none may be present. Raw accuracy is still reported, for comparability with Chang et al. (2025), but balanced accuracy is the metric interpreted first. Sensitivity, specificity, and PPV are also reported per classifier per arm, matching this project's predictive-enrichment framing more directly than accuracy or AUC alone: PPV in particular answers the operationally relevant question (of subjects selected on this construct, what fraction would actually be responders).
 
 **Note.** Band power was never entered into the primary-arm pool as a specific construct. Widge et al.'s (2019) meta-analysis supports band power's extraction as a family (Decision 4a) but doesn't identify any particular channel/band combination as predictive, and no other source surveyed does either. Selecting a subset now could only be done by looking at which columns associate with responder status in this cohort's own labels — the same leakage risk that excludes Stolz et al. (2023) and Arteaga et al. (2025) as feature sources below, despite being the closest comparators. Band power is carried forward only in the full feature-bank arm, where nested feature selection inside cross-validation is the pre-specified mechanism for this kind of undirected search.
 
@@ -119,6 +125,10 @@ The precedent comes with a substantial modality gap, stated explicitly rather th
 
 Deferred to the modelling stage, not built into feature extraction. Age is regressed out of features within training folds only, per this project's existing documented plan, avoiding train/test leakage. Feature extraction computes raw features; age-adjustment is a fold-scoped transform applied afterward.
 
+This is out-of-sample deconfounding as formalized by Chyzhyk et al. (2022): the confound-regression model (feature ~ age) is fit on the training fold only, then its coefficients are applied to remove the age-associated component from both train and test — never fit on train and test jointly, which couples the two and biases the result.
+
+**Caveat, grounded in this cohort, not hypothetical.** Chyzhyk et al. show deconfounding can be overly conservative — removing real shared variance between the confound and the outcome, not just the confound's spurious contribution — and that this risk is worse the more strongly the confound and outcome are associated. Checked directly: age differs significantly between responders and non-responders in this cohort (t = -2.68, p = 0.01, n=160); gender does not (χ² = 1.44, p = 0.23). Given that association, age-regression here carries a genuine risk of removing some outcome-related signal alongside the confound, not just a theoretical one — worth keeping in mind when interpreting any arm's performance after this transform is applied, particularly if performance drops relative to an unadjusted check.
+
 ## References
 
 Arteaga, A., Tong, X., Zhao, K., Carlisle, N. B., Oathes, D. J., Fonzo, G. A., Keller, C. J., & Zhang, Y. (2025). Multiband EEG signatures decoded using machine learning for predicting rTMS treatment response in MDD. Journal of affective disorders, 388, 119483. https://doi.org/10.1016/j.jad.2025.119483
@@ -127,48 +137,50 @@ Bailey, N. W., Hoy, K. E., Rogasch, N. C., Thomson, R. H., McQueen, S., Elliot, 
 
 Bailey, N. W., Krepel, N., van Dijk, H., Leuchter, A. F., Vila-Rodriguez, F., Blumberger, D. M., Downar, J., Wilson, A., Daskalakis, Z. J., Carpenter, L. L., Corlier, J., Arns, M., & Fitzgerald, P. B. (2021). Resting EEG theta connectivity and alpha power to predict repetitive transcranial magnetic stimulation response in depression: A non-replication from the ICON-DB consortium. Clinical Neurophysiology, 132, 650-659. https://doi.org/10.1016/j.clinph.2020.10.018
 
-Bapat, R., Pathak, A., & Banerjee, A. (2024). Metastability indexes global changes in the dynamic working point of the brain following brain stimulation. *Frontiers in Neurorobotics, 18*, 1336438. https://doi.org/10.3389/fnbot.2024.1336438
+Bapat, R., Pathak, A., & Banerjee, A. (2024). Metastability indexes global changes in the dynamic working point of the brain following brain stimulation. Frontiers in Neurorobotics, 18, 1336438. https://doi.org/10.3389/fnbot.2024.1336438
 
-Chang, C.-H., Sack, A. T., Chu, C.-S., & Chang, H.-A. (2025). *EEG-based prediction of rTMS treatment response in depression: Nonlinear features and machine learning with minimal electrode*. medRxiv. https://doi.org/10.1101/2025.10.30.25339032
+Chang, C.-H., Sack, A. T., Chu, C.-S., & Chang, H.-A. (2025). EEG-based prediction of rTMS treatment response in depression: Nonlinear features and machine learning with minimal electrode. medRxiv. https://doi.org/10.1101/2025.10.30.25339032
+
+Chyzhyk, D., Varoquaux, G., Milham, M., & Thirion, B. (2022). How to remove or control confounds in predictive models, with applications to brain biomarkers. GigaScience, 11, giac014. https://doi.org/10.1093/gigascience/giac014
 
 Corlier, J., Carpenter, L. L., Wilson, A. C., Tirrell, E., Gobin, A. P., Kavanaugh, B., Aaronson, S., & Leuchter, A. F. (2019). The relationship between individual alpha peak frequency and clinical outcome with repetitive transcranial magnetic stimulation (rTMS) treatment of major depressive disorder (MDD). Brain Stimulation, 12(6), 1572–1578. https://doi.org/10.1016/j.brs.2019.07.018
 
 Dominicus, L. S., Lodema, D. Y., Oranje, B., Zandstra, M. G., Hermans, A. P. C., Imhof, L., Otte, W. M., Hillebrand, A., Ambrosen, K., Stam, C. J., Ebdrup, B. H., & van Dellen, E. (2025). Reliability and state-dependency of EEG connectivity, complexity and network characteristics. Scientific Reports, 15, Article 38454. https://doi.org/10.1038/s41598-025-23662-z
 
-Duan, W., Chen, X., Wang, Y.-J., Zhao, W., Yuan, H., & Lei, X. (2021). Reproducibility of power spectrum, functional connectivity and network construction in resting-state EEG. *Journal of Neuroscience Methods, 348*, Article 108985. https://doi.org/10.1016/j.jneumeth.2020.108985
+Duan, W., Chen, X., Wang, Y.-J., Zhao, W., Yuan, H., & Lei, X. (2021). Reproducibility of power spectrum, functional connectivity and network construction in resting-state EEG. Journal of Neuroscience Methods, 348, Article 108985. https://doi.org/10.1016/j.jneumeth.2020.108985
 
-Escrichs, A., Sanz Perl, Y., Fisher, P. M., Martínez-Molina, N., G-Guzman, E., Frokjaer, V. G., Kringelbach, M. L., Knudsen, G. M., & Deco, G. (2024). Whole-brain turbulent dynamics predict responsiveness to pharmacological treatment in major depressive disorder. *Molecular Psychiatry, 30*, 1069-1079. https://doi.org/10.1038/s41380-024-02690-7
+Escrichs, A., Sanz Perl, Y., Fisher, P. M., Martínez-Molina, N., G-Guzman, E., Frokjaer, V. G., Kringelbach, M. L., Knudsen, G. M., & Deco, G. (2024). Whole-brain turbulent dynamics predict responsiveness to pharmacological treatment in major depressive disorder. Molecular Psychiatry, 30, 1069-1079. https://doi.org/10.1038/s41380-024-02690-7
 
-Klooster, D., Voetterl, H., Baeken, C., & Arns, M. (2024). Evaluating robustness of brain stimulation biomarkers for depression: A systematic review of magnetic resonance imaging and electroencephalography studies. *Biological Psychiatry, 95*(6), 553-563. https://doi.org/10.1016/j.biopsych.2023.09.009
+Klooster, D., Voetterl, H., Baeken, C., & Arns, M. (2024). Evaluating robustness of brain stimulation biomarkers for depression: A systematic review of magnetic resonance imaging and electroencephalography studies. Biological Psychiatry, 95(6), 553-563. https://doi.org/10.1016/j.biopsych.2023.09.009
 
-Ledoit, O., & Wolf, M. (2004). A well-conditioned estimator for large-dimensional covariance matrices. *Journal of Multivariate Analysis, 88*(2), 365-411.
+Ledoit, O., & Wolf, M. (2004). A well-conditioned estimator for large-dimensional covariance matrices. Journal of Multivariate Analysis, 88(2), 365-411.
 
-Leuchter, A. F., Cook, I. A., Lufkin, R. B., Dunkin, J., Newton, T. F., Cummings, J. L., Mackey, J. K., & Walter, D. O. (1994). Cordance: A new method for assessment of cerebral perfusion and metabolism using quantitative electroencephalography. *NeuroImage, 1*(3), 208-219.
+Leuchter, A. F., Cook, I. A., Lufkin, R. B., Dunkin, J., Newton, T. F., Cummings, J. L., Mackey, J. K., & Walter, D. O. (1994). Cordance: A new method for assessment of cerebral perfusion and metabolism using quantitative electroencephalography. NeuroImage, 1(3), 208-219.
 
-Lotfi, R., Shahsavani, D., & Arashi, M. (2022). Classification in high dimension using the Ledoit-Wolf shrinkage method. *Mathematics, 10*(21), Article 4069. https://doi.org/10.3390/math10214069
+Lotfi, R., Shahsavani, D., & Arashi, M. (2022). Classification in high dimension using the Ledoit-Wolf shrinkage method. Mathematics, 10(21), Article 4069. https://doi.org/10.3390/math10214069
 
-Newson, J. J., & Thiagarajan, T. C. (2019). EEG frequency bands in psychiatric disorders: A review of resting state studies. *Frontiers in Human Neuroscience, 12*, Article 521. https://doi.org/10.3389/fnhum.2018.00521
+Newson, J. J., & Thiagarajan, T. C. (2019). EEG frequency bands in psychiatric disorders: A review of resting state studies. Frontiers in Human Neuroscience, 12, Article 521. https://doi.org/10.3389/fnhum.2018.00521
 
-Provaznikova, B., Monn, A., Seifritz, E., Kronenberg, G., & Olbrich, S. (2025). EEG alpha activity as predictor for TBS-rTMS treatment outcome in depression. *Journal of Psychiatric Research, 182*, 4-12. https://doi.org/10.1016/j.jpsychires.2025.01.002
+Provaznikova, B., Monn, A., Seifritz, E., Kronenberg, G., & Olbrich, S. (2025). EEG alpha activity as predictor for TBS-rTMS treatment outcome in depression. Journal of Psychiatric Research, 182, 4-12. https://doi.org/10.1016/j.jpsychires.2025.01.002
 
-Roelofs, C. L., Krepel, N., Corlier, J., Carpenter, L. L., Fitzgerald, P. B., Daskalakis, Z. J., Tendolkar, I., Wilson, A., Downar, J., Bailey, N. W., Blumberger, D. M., Vila-Rodriguez, F., Leuchter, A. F., & Arns, M. (2021). Individual alpha frequency proximity associated with repetitive transcranial magnetic stimulation outcome: An independent replication study from the ICON-DB consortium. *Clinical Neurophysiology, 132*(2), 643-649. https://doi.org/10.1016/j.clinph.2020.10.017
+Roelofs, C. L., Krepel, N., Corlier, J., Carpenter, L. L., Fitzgerald, P. B., Daskalakis, Z. J., Tendolkar, I., Wilson, A., Downar, J., Bailey, N. W., Blumberger, D. M., Vila-Rodriguez, F., Leuchter, A. F., & Arns, M. (2021). Individual alpha frequency proximity associated with repetitive transcranial magnetic stimulation outcome: An independent replication study from the ICON-DB consortium. Clinical Neurophysiology, 132(2), 643-649. https://doi.org/10.1016/j.clinph.2020.10.017
 
-Schmidt, R., LaFleur, K. J. R., de Reus, M. A., van den Berg, L. H., & van den Heuvel, M. P. (2015). Kuramoto model simulation of neural hubs and dynamic synchrony in the human cerebral connectome. *BMC Neuroscience, 16*, 54. https://doi.org/10.1186/s12868-015-0193-z
+Schmidt, R., LaFleur, K. J. R., de Reus, M. A., van den Berg, L. H., & van den Heuvel, M. P. (2015). Kuramoto model simulation of neural hubs and dynamic synchrony in the human cerebral connectome. BMC Neuroscience, 16, 54. https://doi.org/10.1186/s12868-015-0193-z
 
-Shim, M., Lee, S.-H., & Hwang, H.-J. (2021). Inflated prediction accuracy of neuropsychiatric biomarkers caused by data leakage in feature selection. *Scientific Reports, 11*, Article 7980.
+Shim, M., Lee, S.-H., & Hwang, H.-J. (2021). Inflated prediction accuracy of neuropsychiatric biomarkers caused by data leakage in feature selection. Scientific Reports, 11, Article 7980.
 
-Stam, C. J., Nolte, G., & Daffertshofer, A. (2007). Phase lag index: Assessment of functional connectivity from multi channel EEG and MEG with diminished bias from common sources. *Human Brain Mapping, 28*(11), 1178-1193. https://doi.org/10.1002/hbm.20346
+Stam, C. J., Nolte, G., & Daffertshofer, A. (2007). Phase lag index: Assessment of functional connectivity from multi channel EEG and MEG with diminished bias from common sources. Human Brain Mapping, 28(11), 1178-1193. https://doi.org/10.1002/hbm.20346
 
 Stolz, L. A., Kohn, J. N., Smith, S. E., Benster, L. L., & Appelbaum, L. G. (2023). Predictive biomarkers of treatment response in major depressive disorder. Brain Sciences, 13(11), 1570. https://doi.org/10.3390/brainsci13111570
 
-Strijbis, E. M. M., Timar, Y. S. S., Schoonhoven, D. N., Nauta, I. M., Kulik, S. D., de Ruiter, L. R. J., Schoonheim, M. M., Hillebrand, A., & Stam, C. J. (2022). State changes during resting-state (magneto)encephalographic studies: The effect of drowsiness on spectral, connectivity, and network analyses. *Frontiers in Neuroscience, 16*, Article 782474. https://doi.org/10.3389/fnins.2022.782474
+Strijbis, E. M. M., Timar, Y. S. S., Schoonhoven, D. N., Nauta, I. M., Kulik, S. D., de Ruiter, L. R. J., Schoonheim, M. M., Hillebrand, A., & Stam, C. J. (2022). State changes during resting-state (magneto)encephalographic studies: The effect of drowsiness on spectral, connectivity, and network analyses. Frontiers in Neuroscience, 16, Article 782474. https://doi.org/10.3389/fnins.2022.782474
 
-van der Vinne, N., Vollebregt, M. A., van Putten, M. J. A. M., & Arns, M. (2017). Frontal alpha asymmetry as a diagnostic marker in depression: Fact or fiction? A meta-analysis. *NeuroImage: Clinical, 16*, 79-87.
+van der Vinne, N., Vollebregt, M. A., van Putten, M. J. A. M., & Arns, M. (2017). Frontal alpha asymmetry as a diagnostic marker in depression: Fact or fiction? A meta-analysis. NeuroImage: Clinical, 16, 79-87.
 
-van Dijk, H., van Wingen, G., Denys, D., Olbrich, S., van Ruth, R., & Arns, M. (2022). The two decades brainclinics research archive for insights in neurophysiology (TDBRAIN) database. *Scientific Data, 9*, Article 333. https://doi.org/10.1038/s41597-022-01409-z
+van Dijk, H., van Wingen, G., Denys, D., Olbrich, S., van Ruth, R., & Arns, M. (2022). The two decades brainclinics research archive for insights in neurophysiology (TDBRAIN) database. Scientific Data, 9, Article 333. https://doi.org/10.1038/s41597-022-01409-z
 
-Varoquaux, G. (2018). Cross-validation failure: Small sample sizes lead to large error bars. *NeuroImage, 180*, 68-77.
+Varoquaux, G. (2018). Cross-validation failure: Small sample sizes lead to large error bars. NeuroImage, 180, 68-77.
 
-Widge, A. S., Bilge, M. T., Montana, R., Chang, W., Rodriguez, C., Deckersbach, T., Carpenter, L. L., Kalin, N. H., & Nemeroff, C. B. (2019). Electroencephalographic biomarkers for treatment response prediction in major depressive illness: A meta-analysis. *American Journal of Psychiatry, 176*(1), 44-56.
+Widge, A. S., Bilge, M. T., Montana, R., Chang, W., Rodriguez, C., Deckersbach, T., Carpenter, L. L., Kalin, N. H., & Nemeroff, C. B. (2019). Electroencephalographic biomarkers for treatment response prediction in major depressive illness: A meta-analysis. American Journal of Psychiatry, 176(1), 44-56.
 
-Wiesman, A. I., da Silva Castanheira, J., & Baillet, S. (2022). Stability of spectral estimates in resting-state magnetoencephalography: Recommendations for minimal data duration with neuroanatomical specificity. *NeuroImage, 247*, Article 118823. https://doi.org/10.1016/j.neuroimage.2021.118823
+Wiesman, A. I., da Silva Castanheira, J., & Baillet, S. (2022). Stability of spectral estimates in resting-state magnetoencephalography: Recommendations for minimal data duration with neuroanatomical specificity. NeuroImage, 247, Article 118823. https://doi.org/10.1016/j.neuroimage.2021.118823

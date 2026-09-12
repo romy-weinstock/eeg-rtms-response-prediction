@@ -8,7 +8,7 @@ import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.model_selection import StratifiedKFold, GridSearchCV
 from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix, balanced_accuracy_score
-
+from sklearn.preprocessing import StandardScaler
 
 ## Fold-scoped age deconfounding transformer
 class AgeDeconfounder(BaseEstimator, TransformerMixin):
@@ -67,8 +67,11 @@ class AgeDeconfounder(BaseEstimator, TransformerMixin):
 def run_nested_cv(X, y, age, classifier_specs, n_outer_splits, n_inner_splits, random_state):
     """
     One full nested-CV pass: fold-scoped age deconfounding (AgeDeconfounder,
-    fit on train only) inside each outer fold, then fit/tune each classifier
-    in classifier_specs and score on the held-out test fold.
+    fit on train only), then fold-scoped feature scaling (StandardScaler,
+    fit on train only -- added after unscaled multi-feature arms caused
+    saga convergence failures when features had very different natural
+    scales, e.g. FAA vs. bounded [0,1] Kuramoto metrics), then fit/tune
+    each classifier in classifier_specs and score on the held-out test fold.
 
     Parameters:
     X (array-like, shape (n_samples, n_features)): EEG feature values.
@@ -97,6 +100,10 @@ def run_nested_cv(X, y, age, classifier_specs, n_outer_splits, n_inner_splits, r
         X_train_clean = deconf.transform(X_train, age_train)
         X_test_clean = deconf.transform(X_test, age_test)
 
+        scaler = StandardScaler()
+        X_train_clean = scaler.fit_transform(X_train_clean)
+        X_test_clean = scaler.transform(X_test_clean)
+
         for clf_name, (estimator, param_grid) in classifier_specs.items():
             if param_grid is not None:
                 inner_cv = StratifiedKFold(n_splits=n_inner_splits, shuffle=True, random_state=random_state)
@@ -124,5 +131,81 @@ def run_nested_cv(X, y, age, classifier_specs, n_outer_splits, n_inner_splits, r
                 'specificity': specificity,
                 'ppv': ppv,
             })
+
+    return pd.DataFrame(results)
+
+
+## Paired permutation test: does an extended feature set beat a baseline?
+def paired_comparison_test(X_baseline, X_extended, y, age, classifier_specs,
+                            n_outer_splits, n_inner_splits, random_state, n_permutations):
+    """
+    Tests whether X_extended's mean balanced accuracy exceeds X_baseline's
+    by more than chance would produce, per classifier -- e.g. "does adding
+    Kuramoto to FAA improve on FAA alone?" (Arm 2 vs. Arm 1).
+
+    This is NOT the same as comparing each feature set's own permutation
+    test p-value: two independently-significant results can differ from
+    each other by an amount well within noise. The correct test is paired,
+    on the DIFFERENCE: the same StratifiedKFold splits (same random_state)
+    are used for both feature sets, so fold membership is identical --
+    same subjects, same folds, only the feature set differs. For each of
+    n_permutations, the SAME shuffled label set is used to score both
+    feature sets, and the difference is recorded; this keeps the
+    comparison paired throughout, not just at the observed-data step.
+
+    Parameters:
+    X_baseline (array-like, shape (n_samples, n_features_a)): e.g. FAA alone.
+    X_extended (array-like, shape (n_samples, n_features_b)): e.g. FAA + Kuramoto.
+    y (array-like, shape (n_samples,)): Responder/non-responder labels.
+    age (array-like, shape (n_samples,)): Subject age, same order as X, y.
+    classifier_specs (dict): name -> (estimator, param_grid or None).
+    n_outer_splits, n_inner_splits (int): StratifiedKFold fold counts.
+    random_state (int): shared seed -- must match whatever seeded the
+    original observed-data runs for both feature sets, so fold membership
+    is identical.
+    n_permutations (int): number of label shuffles for the null distribution.
+
+    Returns:
+    pd.DataFrame, one row per classifier: classifier, observed_diff,
+    null_mean, p_value. p_value is the fraction of the null difference
+    distribution at or above the observed difference (+1/+1 correction).
+    """
+    baseline_observed_df = run_nested_cv(X_baseline, y, age, classifier_specs,
+                                          n_outer_splits, n_inner_splits, random_state)
+    extended_observed_df = run_nested_cv(X_extended, y, age, classifier_specs,
+                                          n_outer_splits, n_inner_splits, random_state)
+
+    baseline_observed = baseline_observed_df.groupby('classifier')['balanced_accuracy'].mean().to_dict()
+    extended_observed = extended_observed_df.groupby('classifier')['balanced_accuracy'].mean().to_dict()
+
+    observed_diff = {name: extended_observed[name] - baseline_observed[name] for name in classifier_specs}
+
+    rng = np.random.RandomState(random_state)
+    null_diffs = {name: [] for name in classifier_specs}
+
+    for _ in range(n_permutations):
+        y_shuffled = rng.permutation(y)
+
+        perm_extended = run_nested_cv(X_extended, y_shuffled, age, classifier_specs,
+                                       n_outer_splits, n_inner_splits, random_state)
+        perm_extended_scores = perm_extended.groupby('classifier')['balanced_accuracy'].mean().to_dict()
+
+        perm_baseline = run_nested_cv(X_baseline, y_shuffled, age, classifier_specs,
+                                       n_outer_splits, n_inner_splits, random_state)
+        perm_baseline_scores = perm_baseline.groupby('classifier')['balanced_accuracy'].mean().to_dict()
+
+        for name in classifier_specs:
+            null_diffs[name].append(perm_extended_scores[name] - perm_baseline_scores[name])
+
+    results = []
+    for name in classifier_specs:
+        null_arr = np.array(null_diffs[name])
+        p_value = (np.sum(null_arr >= observed_diff[name]) + 1) / (n_permutations + 1)
+        results.append({
+            'classifier': name,
+            'observed_diff': observed_diff[name],
+            'null_mean': null_arr.mean(),
+            'p_value': p_value,
+        })
 
     return pd.DataFrame(results)

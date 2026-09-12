@@ -73,7 +73,7 @@ Age is regressed out of features within training folds only, at the modelling st
 
 **Open item:** an unresolved discrepancy was found between this cohort's rTMS protocol composition and the published TDBRAIN data descriptor (van Dijk et al., 2022, Table 2) - see `docs/modelling_decisions.md`, Decision 5, for detail. Flagged as a candidate for direct follow-up with Brainclinics if it becomes material to results.
 
-## Feature extraction status (27/08/26) - complete
+## Feature extraction status (27/08/26)
 
 Pipeline: `load_subject_epochs -> get_subject_qc -> compute_band_power -> compute_pli -> compute_coherence_plv -> compute_kuramoto`, tied together by `extract_subject_features`.
 
@@ -87,7 +87,7 @@ Pipeline: `load_subject_epochs -> get_subject_qc -> compute_band_power -> comput
 
 **IAF-proximity** (supplementary, protocol-1 only, n=42): built and validated (manual derivation, exact refactor match) in `06`, extracted standalone in `07` - not part of the primary or secondary feature bank. 7-13 Hz peak-picking at F3, matched to Roelofs et al. (2021)'s method. Peak-identifiability check found no basis for their low-alpha exclusion criterion in this sample; all 42 subjects retained. Saved as `data/features/iaf_protocol1.parquet`. Association test deferred to modelling stage.
 
-### Feature matrix assembly and QC - complete
+### Feature matrix assembly and QC
 
 `full_cohort_features.parquet` (160 x 5031) is confirmed as the complete secondary-arm feature bank — band power, PLI, coherence, PLV, and Kuramoto in one matrix. IAF-proximity remains a standalone supplementary file (protocol-1 subgroup, n=42).
 
@@ -103,4 +103,6 @@ A fourth classifier (unregularized logistic regression) was added across every a
 
 Evaluation design expanded from three arms to six, plus two supplementary tests (IAF-proximity; a new Bailey construct replication check), all pre-specified together. Full detail and citations: [`docs/modelling_decisions.md`](docs/modelling_decisions.md).
 
-**Arm 1 results** ([`notebooks/08_arm1_primary_pool.ipynb`](notebooks/08_arm1_primary_pool.ipynb)): FAA alone, nested CV (5 outer / 3 inner folds) + 1,000-permutation testing. Elastic-net clears significance (balanced accuracy 0.587, p=0.016); the other three classifiers sit at the boundary (p≈0.05) and don't. No winner selected, per design — weak, borderline evidence overall, below Provaznikova et al.'s reported strength (AUC 0.75-0.81 vs. 0.639 here). The fold-scoped age transformer (`AgeDeconfounder`) and nested-CV harness (`run_nested_cv`), validated here, move to `src/modelling.py` for reuse in Arms 2-6.
+**Arm 1 results** ([`notebooks/08_arm1_primary_pool.ipynb`](notebooks/08_arm1_primary_pool.ipynb)): FAA alone, nested CV (5 outer / 3 inner folds) + 1,000-permutation testing. Elastic-net clears significance (balanced accuracy 0.587, p=0.016); the other three classifiers sit at the boundary (p≈0.05) and don't. No winner selected, per design — weak, borderline evidence overall, below Provaznikova et al.'s reported strength (AUC 0.75–0.81 vs. 0.639 here). The fold-scoped age transformer (`AgeDeconfounder`) and nested-CV harness (`run_nested_cv`), validated here, move to `src/modelling.py` for reuse in Arms 2–6.
+
+**Arm 2 results** ([`notebooks/09_arm2_primary_pool_kuramoto.ipynb`](notebooks/09_arm2_primary_pool_kuramoto.ipynb)): FAA + Kuramoto (order parameter and metastability, all five bands), same harness and procedure as Arm 1. A fold-scoped `StandardScaler` was added to `run_nested_cv` after combining FAA (range ~134) with bounded [0,1] Kuramoto features caused solver convergence failures — Arm 1's results were unaffected by this change. All four classifiers clear significance (balanced accuracy 0.597–0.618, p=0.008–0.025), a more consistent result than Arm 1. However, a direct paired permutation test (`paired_comparison_test`, same folds and shuffled labels for both feature sets) found no significant improvement over FAA alone for any classifier (p=0.22–0.36) — Decision 6's core question, whether synchrony adds value beyond standard features, is not resolved by this arm.

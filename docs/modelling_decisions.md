@@ -92,16 +92,18 @@ Note on independence: Roelofs et al.'s (2021) replication sample comes from an o
 
 The full feature bank (`full_cohort_features.parquet`, 160×5031: band power, PLI, coherence, PLV, and Kuramoto order parameter/metastability across all channels and all five bands — confirmed complete and self-consistent at the matrix-assembly QC pass; see `feature_extraction_notes.md`) is used in the secondary, exploratory arm, with nested feature selection inside CV per Shim, Lee, and Hwang (2021).
 
-**Full pre-specified evaluation set.** Six arms plus two supplementary tests, specified together and reported in full regardless of outcome, avoiding an implicit multiple-comparisons problem where only better-performing results get reported:
+**Full pre-specified evaluation set.** Originally six arms plus two supplementary tests; revised to five arms plus two supplementary tests after Arm 3 was retired (below). Specified together, reported in full regardless of outcome, avoiding an implicit multiple-comparisons problem where only better-performing results get reported. Arm numbers are kept stable rather than renumbered after Arm 3's retirement, since 1, 2, and 4 were already written up under those numbers:
 
 1. Primary pool alone (FAA)
 2. Primary pool + Kuramoto (Decision 6)
-3. PLI vs. coherence/PLV (Decision 2)
+3. *(retired — see below)*
 4. Full feature bank, nested selection, plus XGBoost/random forest
 5. heog_off vs. heog_on (Decision 1)
 6. restEC vs. restEO (Decision 4)
 
 Supplementary: IAF-proximity association test (above); Bailey construct replication check (above).
+
+**Arm 3 (PLI vs. coherence/PLV) retired.** As originally framed, this arm needed either a fixed connectivity summary to add to the primary pool or a method for selecting among the full 1,625-column PLI/coherence/PLV bank — and neither is available without violating Stage 1. No independent-sample citation exists for any specific connectivity summary beyond the Bailey construct (already accounted for), and selecting a subset from the full matrix now could only be done by looking at which columns associate with responder status in this cohort's own labels — the same leakage risk that already excludes band power, Stolz et al. (2023), and Arteaga et al. (2025) from the primary pool. Decision 2's actual claim (PLI is more volume-conduction-robust than coherence/PLV) is already testable without a new arm: the Bailey supplementary test substitutes PLI for the original wPLI, which is the one place this project has a real connectivity feature with a predictive question attached. That test is run as originally specified (PLI substitute only); no coherence/PLV extension was added, to keep scope to what was already committed.
 
 ## 6. Kuramoto synchrony metrics
 

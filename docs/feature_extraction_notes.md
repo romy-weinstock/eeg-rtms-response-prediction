@@ -97,3 +97,15 @@ values within [7,13]. Saved to `data/features/iaf_protocol1.parquet`, reload-ver
 - Row-wise missingness: 1 NaN/subject uniformly, all `preprocessing_error` (expected, null-by-design on success).
 - Exact-zero variance: 0/5015 columns.
 - CV (std/mean) near-zero check: no natural gap in the distribution (checked via zoomed histogram, CV < 0.1) — lowest 30 CV columns are exclusively PLV, exclusively spatially-adjacent electrode pairs. Extends Decision 2's single-subject illustrative volume-conduction comparison (Fp1-Fp2, coherence 0.947/PLV 0.993 vs. PLI 0.137) to a full-cohort, multi-pair confirmation. No exclusions applied — effect is graded, not binary; any down-weighting or exclusion is a modelling-stage call, not extraction-stage.
+
+## Bailey theta PLI (supplementary, not part of primary/secondary feature bank)
+
+Built and validated directly in `notebooks/11_bailey_supplementary.ipynb` - not refactored into `src/features.py`, unlike the four primary/secondary feature families, since this is a single-use extractor for one fixed set of 14 named pairs and one condition/variant (restEC/heog_off only), not a general-purpose function.
+
+**Fixed-pairs PLI, not all-pairs.** `compute_bailey_theta_pli` takes named electrode pairs directly (`ch_names.index(a)`/`ch_names.index(b)` lookup) rather than `compute_pli`'s `itertools.combinations` all-pairs approach. Single band only (theta, 4-8 Hz) - asserts `len(band)==1`, rejecting the multi-band dict `compute_pli` expects, since Bailey's measure is theta-only.
+
+**Averaged into one feature.** Unlike `compute_pli`'s per-pair output, this returns one subject-level value: mean PLI across all 14 named pairs, matching Bailey et al.'s (2019, 2021) single averaged theta wPLI summary measure (their Table 1), not a 14-column feature bank.
+
+**Refactor validation, cross-check not manual derivation.** Validated against `compute_pli`'s already-validated all-pairs output on the pilot subject, rather than a hand-derived value: extracted the same 14 pairs from `compute_pli`'s full output (checking both channel-name orderings, since `combinations()`'s pair ordering isn't guaranteed to match the named-pair order) and averaged, compared to `compute_bailey_theta_pli`'s direct output. Matched to 6 decimal places (0.320911 both ways).
+
+**Full-cohort run.** restEC/heog_off, matching Arm 1's cohort exactly (same subject filter). 160/160 succeeded, one column (`bailey_theta_pli_avg`), values in range 0.16-0.32, no NaNs.

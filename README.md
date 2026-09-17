@@ -1,6 +1,77 @@
 # EEG-Based Prediction of rTMS Treatment Response in Depression
 
-Investigating whether pre-treatment EEG connectivity and oscillator-synchrony features can predict rTMS response in MDD.
+## Summary
+
+This project tests whether pre-treatment resting-state EEG features can predict rTMS response in major depressive disorder, using the TDBRAIN dataset (van Dijk et al., 2022; n=160-163). Framed as a predictive-enrichment problem, a biomarker-based patient-stratification concept used in CNS clinical trial design.
+
+Seven pre-specified analyses were run: a primary feature (frontal alpha asymmetry, FAA), an extension (adding Kuramoto synchrony measures), two preprocessing sensitivity checks, a full feature-bank arm with nested selection and nonlinear classifiers, and two independent replication checks of published EEG biomarkers. All results are reported regardless of outcome, avoiding selective reporting.
+
+**Headline finding:** FAA shows a weak but consistent association with responder status (elastic-net balanced accuracy 0.577-0.618 depending on preprocessing arm, p<0.05 in most configurations) that is robust to two preprocessing choices but not improved by adding synchrony features or expanding to the full ~5,000-feature bank with nonlinear models. Both independent biomarker replication checks (Bailey et al.'s theta connectivity; Roelofs et al.'s IAF-proximity) returned null results in this cohort.
+
+**Stack:** Python, MNE-Python, scikit-learn, XGBoost. Full methodology and citations in [`docs/modelling_decisions.md`]; full build narrative in [`docs/development_log.md`]).
+
+## Results at a glance
+
+| Test | What's tested | Headline result | Significant? |
+|---|---|---|---|
+| Arm 1 | FAA alone (primary pool) | Elastic-net 0.587, p=0.016; other 3 classifiers at ~0.05 boundary | Partial (1/4) |
+| Arm 2 | FAA + Kuramoto (order/metastability) | All 4 classifiers 0.597-0.618, p=0.008-0.025; no improvement over Arm 1 (paired test p=0.22-0.36) | Yes, but not better than Arm 1 |
+| Arm 4 | Full feature bank (~5,015 features), nested MI selection, +XGBoost/RF | All 6 classifiers null, p=0.139-0.931; severe fold-to-fold instability | No |
+| Arm 5 | FAA, heog_on (HEOG-correction sensitivity check) | All 4 classifiers 0.577-0.584, p=0.019-0.037 | Yes (4/4) |
+| Arm 6 | FAA, restEO (resting-condition sensitivity check) | All 4 classifiers 0.608, p=0.005-0.007 | Yes (4/4) |
+| Bailey supplementary | Theta connectivity replication (Bailey et al., 2019/2021) | All 4 classifiers null, p=0.92-0.98 | No |
+| IAF-proximity supplementary | IAF-to-10Hz replication (Corlier 2019/Roelofs 2021), n=42 | Logistic p=0.721; Mann-Whitney p=0.546 | No |
+
+*Arm 3 was retired during design (no independent-sample-grounded connectivity construct available for that slot) - see `docs/modelling_decisions.md`. Full detail on every arm, including the Arm 4 instability pattern, is in `docs/development_log.md`.*
+
+## Limitations
+
+- **Sample size**: n=163 overall, n=42 for the IAF-proximity subgroup. A single held-out test split would have very high variance at this n (Varoquaux, 2018), so nested cross-validation plus permutation testing is used in its place - there is no fully independent lockbox test set.
+- **Baseline session assumption**: for the 8/163 subjects with two recorded sessions, `sessID == 1` is taken as the pre-treatment baseline. This is a documented assumption, not something the TDBRAIN data descriptor confirms explicitly (see `docs/modelling_decisions.md`).
+- **Effect sizes are weak**: balanced accuracy throughout sits at 0.58-0.62, below some published single-cohort benchmarks (e.g. Provaznikova et al., 2025: AUC 0.75-0.81) - reported as found, not adjusted to look stronger.
+
+## Repository guide
+
+### Documents
+
+**[`docs/modelling_decisions.md`]** - every design decision, with reasoning and citations, made *before* results were seen. Read this to understand *why* the project is shaped the way it is. Covers: primary/secondary feature pool selection (Decisions 1-4), the Bailey biomarker's exclusion from the primary pool and repositioning as a standalone replication check (Decision 5), Kuramoto synchrony rationale (Decision 6), classifier/metric/deconfounding choices (Decision 7), and the Arm 4 feature-selection methodology addendum.
+
+**[`docs/development_log.md`]** - the full chronological build narrative, session by session: what was tried, what broke, what changed and why, in the order it happened. Read this for the *story* of the project - cohort validation, preprocessing pipeline development, feature extraction, and each modelling arm's build process and results, including bugs caught and how they were diagnosed.
+
+**[`docs/feature_extraction_notes.md`]** - implementation-level detail for every feature extraction function (band power, PLI, coherence/PLV, Kuramoto, IAF-proximity, Bailey theta PLI): validation methodology, tool choices, bugs caught, full-cohort QC results. Read this if you want to know exactly how a specific feature was computed and verified.
+
+**[`docs/preprocessing_notes.md`]** - the preprocessing pipeline in detail: documented deviations from the original TDBRAIN methodology, HEOG correction approach, known limitations.
+
+### Notebooks (numbered in build order)
+
+| Notebook | Contents |
+|---|---|
+| `00_mne_fundamentals_tutorial.ipynb` | MNE-Python tool-learning (ICA exploration) - not the final pipeline |
+| `1_cohort_exploration.ipynb` | Cohort definition and validation: MDD filtering, baseline-session investigation, Responder-label verification |
+| `02_preprocessing_pilot.ipynb` | Preprocessing methodology, built and validated on one pilot subject |
+| `03_batch_test.ipynb` | Preprocessing validated on a 6-subject stratified batch |
+| `04_full_cohort_run.ipynb` | Preprocessing run across the full 160-subject cohort |
+| `05_modelling_prechecks.ipynb` | Pre-extraction assumption checks (protocol composition, epoch-count/age confound) |
+| `06_feature_extraction_pilot.ipynb` | Feature extraction functions, built and validated on the pilot subject |
+| `07_feature_extraction_full_cohort.ipynb` | Full-cohort feature extraction and matrix-level QC |
+| `08_arm1_primary_pool.ipynb` | **Arm 1**: FAA alone |
+| `09_arm2_primary_pool_kuramoto.ipynb` | **Arm 2**: FAA + Kuramoto |
+| `10_arm5_arm6_feature_extraction.ipynb` | **Arm 5** (heog_on) and **Arm 6** (restEO) sensitivity checks |
+| `11_bailey_supplementary.ipynb` | Bailey theta connectivity replication check |
+| `12_iaf_proximity_supplementary.ipynb` | IAF-proximity replication check |
+| `13_arm4_full_feature_bank.ipynb` | **Arm 4**: full feature bank, nested selection, XGBoost/RF |
+
+### Source code
+
+**`src/preprocessing.py`** - the validated preprocessing pipeline (twelve functions + `preprocess_subject` orchestrator).
+**`src/features.py`** - validated feature extraction functions (`compute_band_power`, `compute_pli`, `compute_coherence_plv`, `compute_kuramoto`, `compute_iaf`) + `extract_subject_features` orchestrator.
+**`src/modelling.py`** - `AgeDeconfounder`, `run_nested_cv`, `paired_comparison_test` - reused unchanged across Arms 1, 2, 5, 6, and the Bailey/IAF supplementary tests.
+
+## Reproducing this
+
+- **Data access**: raw TDBRAIN data is not included in this repository and this project is not clone-and-run. The dataset is provided by the Brainclinics Foundation under a Data Use Agreement that restricts redistribution - access must be requested independently (see Data, below).
+- **Environment**: Python 3.11, conda environment `eeg-rtms`; see `requirements.txt` for dependencies (MNE-Python, MNE-Connectivity, scikit-learn, XGBoost, pandas, scipy).
+- **Pipeline order**: `00` (tool-learning, not part of the final pipeline) -> `1` (cohort definition and validation) -> `02`-`04` (preprocessing) -> `05` (pre-extraction assumption checks) -> `06`-`07` (feature extraction) -> `08`-`13` (modelling arms and supplementary tests).
 
 ## Data
 
@@ -10,117 +81,4 @@ Citation: van Dijk, H., van Wingen, G., Denys, D. et al. The two decades braincl
 
 Data source: https://brainclinics.com/resources/tdbrain-dataset
 
-Raw data is not included in this repository (see .gitignore) and is subject to the terms of the TDBRAIN Data Use Agreement, including restrictions on redistribution and re-identification of subjects.
-
-## Cohort Definition and Validation Update (09/07/26)
-
-### Subject selection
-
-Filtered to `indication == 'MDD'` (pure diagnosis, excluding comorbid rows e.g. `MDD/OCD/ADHD`) with non-null `Responder` label. Final cohort: **163 unique subjects** (94 responders, 69 non-responders). Subjects with MDD diagnosis but no documented rTMS outcome (n=~159) and non-MDD diagnoses with rTMS outcomes were excluded as out of scope for this supervised prediction task.
-
-### Baseline EEG session assumption
-
-Of the 163 subjects, 155 have a single session; 8 have two sessions. Where multiple sessions exist, `sessID == 1` is taken as the pre-treatment baseline recording. **This is an assumption, not an explicitly confirmed rule**, the TDBRAIN data descriptor (van Dijk et al., 2022) does not state that session numbering corresponds to treatment chronology. Investigation ruled out an alternative explanation (that `Responder` was null for `ses-2` rows); `Responder` is in fact identical across a subject's sessions, so `sessID == 1` was a deliberate choice.
-
-Confirmed all 163 subjects have both restEC and restEO baseline recordings available in the Discovery dataset.
-
-### Responder definition - empirically verified
-
-The `Responder` label was independently verified against raw BDI-II scores rather than trusted at face value. Percent improvement was computed as `-(BDI_post - BDI_pre) / BDI_pre * 100`, and a ≥50% threshold was compared against the existing label: **163/163 exact match.** This confirms `Responder` is defined as ≥50% reduction in BDI-II from baseline to post-treatment, consistent with the DLPFC-rTMS sample criteria described in van Dijk et al. (2022).
-
-### Demographic and clinical balance checks (Responder vs Non-responder)
-
-- **Age**: significant difference (M=42.85 vs 48.68, Welch's t=-2.68, p=.01). Responders are younger on average. **Flagged as a potential confound** for EEG-based modelling, since EEG features are known to vary with age (see TDBRAIN iAPF maturation findings). To be addressed in modelling (e.g. as a covariate or via stratification).
-- **Gender**: balanced, no significant difference (χ²=1.44, p=.23).
-- **Baseline BDI severity**: balanced, no significant difference (t=-1.45, p=.15), rules out baseline severity as a confound for treatment outcome.
-
-### Missingness
-
-No missingness in the fields used by this project (age, gender, BDI_pre, BDI_post, Responder) for the final 163-subject cohort - confirmed as a byproduct of the checks above. Broader spreadsheet fields (education, NEO-FFI, etc.) are out of scope for this project and were not audited, since they are not planned as model inputs.
-
-## Update regarding preprocessing pipeline
-
-The original plan was to use the TDBRAIN authors' published preprocessing pipeline directly. On inspection, this code does not run on the current dataset release: it expects CSV files with a fixed 33-channel layout and a legacy filename convention, neither of which match the BDF/BIDS-formatted files provided in the current TDBRAIN V3.1 dataset. This is a compatibility gap between the published code and the dataset's more recent format update, not a limitation of the methodology itself.
-
-To address this, preprocessing for this project reimplements the documented methodology from van Dijk et al. (2022) natively in MNE-Python, rather than using the original code directly. Specifically, EOG artifact correction uses the regression-based method published by Gratton et al. (1983), matching the authors' documented approach, the ICA-based artifact removal explored in the MNE fundamentals notebook (`00_mne_fundamentals_tutorial.ipynb`) was tool-learning, not the method used in the final pipeline.
-
-## Preprocessing status (17/08/26) - complete
-
-Pipeline order (matching authors' dataset class methods): bipolarEOG -> demean -> apply_filters -> correct_EOG -> epoching -> artefact rejection.
-
-Methodology developed and validated on a single pilot subject in `notebooks/02_preprocessing_pilot.ipynb`, refactored into `src/preprocessing.py` (twelve functions plus a `preprocess_subject` orchestrator), and validated at increasing scale: pilot subject, a 6-subject stratified batch (`notebooks/03_batch_test.ipynb`), and the full 160-subject usable cohort (`notebooks/04_full_cohort_run.ipynb`).
-
-Full-cohort results: 160 of 163 subjects usable (3 have no source data present, not a pipeline issue). Two parallel output variants produced (`data/derivatives_heog_off/`, `data/derivatives_heog_on/`) for a planned modelling-stage sensitivity check on HEOG correction. autoreject parameter instability, investigated and characterised earlier, confirmed at full scale (~38% of subject/conditions flagged) and captured as QC metadata rather than excluded. Epoch retention: median 95.8%.
-
-Known limitations, documented rather than silently resolved: HEOG correction confidence is improved (baseline-drift removal, literature-grounded duration bounds) but not fully resolved - HEOG correction is off by default. Full detail, all documented deviations from the authors' code, and the complete decision trail: see `docs/preprocessing_notes.md`.
-
-## Modelling Plan Update (22/08/26)
-
-Seven pre-extraction modelling decisions were finalised. Full detail, sources, and open items are documented in `docs/modelling_decisions.md`; summary below.
-
-Two prechecks were run first (`notebooks/05_modelling_prechecks.ipynb`) to verify assumptions before they could be silently carried into feature extraction: cohort rTMS protocol composition against the literature basis for one candidate feature, and retained-epoch-count against age, to rule out a hidden selection effect from the epoch-count inclusion floor.
-
-**Preprocessing/feature-scope comparison arms:** `heog_off` and `restEC` are primary for all main analyses; `heog_on` and `restEO` are dedicated sensitivity arms, since the full cohort was preprocessed under both conditions specifically to support this comparison.
-
-**Features:** Frequency bands matched to the closest directly comparable study (Chang et al., 2025). PLI is the primary connectivity metric, chosen for volume-conduction robustness (Stam, Nolte & Daffertshofer, 2007), with coherence and PLV as secondary comparisons. Band/ratio power features are log-transformed; connectivity features are not. Subjects are aggregated by mean across epochs; the ~10-epoch inclusion floor was empirically confirmed non-age-biased and non-binding for this cohort (all 160 subjects with valid QC data retain 21-24 epochs).
-
-**Modelling - three pre-specified arms, all reported regardless of outcome:**
-- *Primary*: Ledoit-Wolf shrinkage LDA, elastic-net logistic regression, and Bayesian logistic regression on a literature-curated, replication-weighted feature pool (n=163).
-- *Secondary/exploratory*: adds XGBoost and random forest on the full feature bank (~1,755+ features), with nested feature selection inside cross-validation.
-- *Supplementary*: a replication check (not a trained classifier) of individual alpha frequency (IAF) proximity to 10Hz, restricted to the n=42 subjects on the matching rTMS protocol, since the published evidence for this feature (Corlier et al., 2019; Roelofs et al., 2021) only covers that specific subgroup.
-
-Age is regressed out of features within training folds only, at the modelling stage, consistent across all arms.
-
-**Open item:** an unresolved discrepancy was found between this cohort's rTMS protocol composition and the published TDBRAIN data descriptor (van Dijk et al., 2022, Table 2) - see `docs/modelling_decisions.md`, Decision 5, for detail. Flagged as a candidate for direct follow-up with Brainclinics if it becomes material to results.
-
-## Feature extraction status (27/08/26)
-
-Pipeline: `load_subject_epochs -> get_subject_qc -> compute_band_power -> compute_pli -> compute_coherence_plv -> compute_kuramoto`, tied together by `extract_subject_features`.
-
-**Band power**: built and validated on pilot subject `sub-87999321` in `06_feature_extraction_pilot.ipynb`, refactored into `src/features.py` (130 columns, Welch PSD, uV^2/Hz, matched to 15 decimal places). Full cohort (`07`): 160/160 succeeded, 160x146 matrix, QC'd (143/160 show posterior > frontal alpha), saved as `data/features/bandpower_full_cohort.parquet`. Ratio-power scope decided: asymmetry excluded (Decision 5), theta/beta excluded (no MDD/rTMS grounding), relative power deferred.
-
-**PLI** (primary connectivity metric): built and validated (pilot + 6- subject batch) via `mne_connectivity spectral_connectivity_epochs`. 1,625 columns (325 pairs x 5 bands), exact refactor match (0/1625 mismatches). Full cohort: 160/160 succeeded, 160x1771 matrix, saved as `data/features/full_cohort_features.parquet`.
-
-**Coherence and PLV** (secondary metrics): built and validated (pilot + batch + full cohort), computed together in one `spectral_connectivity_epochs` call. 3,250 columns, exact refactor match (0/3250 mismatches). Pilot illustration (Fp1-Fp2, alpha: coherence 0.947, PLV 0.993, vs. PLI 0.137) shows the volume-conduction sensitivity these metrics are compared against PLI to assess. Full cohort: 160/160 succeeded, matrix extended to 160x5021.
-
-**Kuramoto order parameter and metastability**: built and validated (pilot + batch + full cohort). Band-pass filter, Hilbert transform, order parameter (mean of R(t)) and metastability (std of R(t)) per epoch, per band; global across all 26 channels (Decision 6). 10 columns (5 bands x 2 metrics), exact refactor match (0/10 mismatches). Filter edge-effect check (delta worst case, gamma best case, all retained epochs) found no systematic distortion; no trimming applied. Full cohort: 160/160 succeeded, matrix extended to 160x5031, saved as `data/features/full_cohort_features.parquet`.
-
-**IAF-proximity** (supplementary, protocol-1 only, n=42): built and validated (manual derivation, exact refactor match) in `06`, extracted standalone in `07` - not part of the primary or secondary feature bank. 7-13 Hz peak-picking at F3, matched to Roelofs et al. (2021)'s method. Peak-identifiability check found no basis for their low-alpha exclusion criterion in this sample; all 42 subjects retained. Saved as `data/features/iaf_protocol1.parquet`. Association test deferred to modelling stage.
-
-### Feature matrix assembly and QC
-
-`full_cohort_features.parquet` (160 x 5031) is confirmed as the complete secondary-arm feature bank — band power, PLI, coherence, PLV, and Kuramoto in one matrix. IAF-proximity remains a standalone supplementary file (protocol-1 subgroup, n=42).
-
-Matrix-level QC (distinct from each feature family's own extraction-time validation) found: no unexpected missingness, no zero-variance columns, and no natural low-CV cutoff — the lowest-variance columns are consistently PLV values for spatially adjacent electrode pairs, reinforcing the volume-conduction rationale behind choosing PLI as the primary connectivity measure.
-
-Full detail (bugs caught, tool choices, reasoning):[`docs/feature_extraction_notes.md`](docs/feature_extraction_notes.md).
-
-## Modelling: primary-arm revision and Arm 1 results (29/08/26)
-
-Primary pool revised to a single construct: FAA (raw F4−F3, matching Provaznikova et al., 2025) is now the sole primary-arm feature. Bailey et al.'s theta connectivity/alpha power construct was excluded — well-specified (14 named electrode pairs) but already failed independent multi-site replication (N≈193) — and moved to a new supplementary replication check instead. Citation correction: the construct's source is Bailey et al. (2019), not 2018; its non-replication is Bailey et al. (2021), not 2020.
-
-A fourth classifier (unregularized logistic regression) was added across every arm as a diagnostic control. All four now use class-balanced weighting, adopted after an unweighted run showed majority-class bias (specificity as low as 0.15). Balanced accuracy is now the primary metric; sensitivity, specificity, and PPV are also reported.
-
-Evaluation design expanded from three arms to six, plus two supplementary tests (IAF-proximity; a new Bailey construct replication check), all pre-specified together. Full detail and citations: [`docs/modelling_decisions.md`](docs/modelling_decisions.md).
-
-**Arm 1 results** ([`notebooks/08_arm1_primary_pool.ipynb`](notebooks/08_arm1_primary_pool.ipynb)): FAA alone, nested CV (5 outer / 3 inner folds) + 1,000-permutation testing. Elastic-net clears significance (balanced accuracy 0.587, p=0.016); the other three classifiers sit at the boundary (p≈0.05) and don't. No winner selected, per design — weak, borderline evidence overall, below Provaznikova et al.'s reported strength (AUC 0.75–0.81 vs. 0.639 here). The fold-scoped age transformer (`AgeDeconfounder`) and nested-CV harness (`run_nested_cv`), validated here, move to `src/modelling.py` for reuse in Arms 2–6.
-
-**Arm 2 results** ([`notebooks/09_arm2_primary_pool_kuramoto.ipynb`](notebooks/09_arm2_primary_pool_kuramoto.ipynb)): FAA + Kuramoto (order parameter and metastability, all five bands), same harness and procedure as Arm 1. A fold-scoped `StandardScaler` was added to `run_nested_cv` after combining FAA (range ~134) with bounded [0,1] Kuramoto features caused solver convergence failures — Arm 1's results were unaffected by this change. All four classifiers clear significance (balanced accuracy 0.597–0.618, p=0.008–0.025), a more consistent result than Arm 1. However, a direct paired permutation test (`paired_comparison_test`, same folds and shuffled labels for both feature sets) found no significant improvement over FAA alone for any classifier (p=0.22–0.36) — Decision 6's core question, whether synchrony adds value beyond standard features, is not resolved by this arm.
-
-**Arm 3 retired.** As originally framed (PLI vs. coherence/PLV as a primary-pool arm), no independent-sample-grounded connectivity construct exists to fill that slot without violating the same leakage-avoidance standard that already excludes band power from the primary pool. Decision 2's actual claim - PLI's volume-conduction robustness relative to coherence/PLV — is tested instead via the Bailey supplementary test, which already substitutes PLI for the original wPLI. Arm numbers 1, 2, 4, 5, 6 are kept stable rather than renumbered. Full detail: `docs/modelling_decisions.md`.
-
-## Sensitivity checks and Bailey supplementary results (13/09/26)
-
-**Arm 5 results** ([`notebooks/10_arm5_arm6_feature_extraction.ipynb`](notebooks/10_arm5_arm6_feature_extraction.ipynb)): heog_on sensitivity check (Decision 1), FAA alone, same harness as Arm 1. All four classifiers clear significance (balanced accuracy 0.577-0.584, p=0.019-0.037), similar magnitude to Arm 1 (0.571-0.587, p=0.016-0.052). The FAA-responder association is not an artifact of the HEOG-correction choice.
-
-**Arm 6 results** (same notebook): restEO sensitivity check (Decision 4), FAA alone, heog_off held fixed (matching Arm 1). All four classifiers clear significance more strongly than Arm 1 or Arm 5 (balanced accuracy 0.608, p=0.005-0.007). All four classifiers - including LDA, not just the three logistic variants seen in Arm 1/5 - converge to identical balanced accuracy across every outer fold; checked directly against raw predicted probabilities (distinct values, differing hyperparameters, identical classifications), confirming genuine convergence under a single-predictor decision boundary, not a bug. No formal statistical comparison (`paired_comparison_test`) has been run between Arm 6 and Arm 1/5 - "stronger" is descriptive, not a tested claim.
-
-**Bailey supplementary results** ([`notebooks/11_bailey_supplementary.ipynb`](notebooks/11_bailey_supplementary.ipynb)): theta connectivity (PLI substitute for wPLI, 14 named pairs averaged, restEC/heog_off), tested per Decision 5's implementation. No classifier exceeds chance (balanced accuracy 0.425-0.433, p=0.92-0.98) - a third independent null for this construct, after Bailey et al.'s (2019) small positive exploratory result and Bailey et al.'s (2021) N=193 failed replication. TDBRAIN's montage supports the full 14-pair set, unlike the 2021 replication's reduced coverage. Elastic-net showed unstable per-fold hyperparameter selection (`C` ranging 0.01-100 across folds) under this weak/null feature - diagnosed as `GridSearchCV` tie-breaking to the first-evaluated grid point when inner-CV scores tie, not a pipeline bug; worth watching for in Arm 4's larger feature bank.
-
-Alpha power, Bailey's second construct, was not tested in this check - scoped to theta connectivity only, the construct that drove the original 2019 ML result.
-
-## IAF-proximity supplementary results (14/09/26)
-
-**IAF-proximity results** ([`notebooks/12_iaf_proximity_supplementary.ipynb`](notebooks/12_iaf_proximity_supplementary.ipynb)): protocol-1 subgroup (n=42), per Decision 5. No association with responder status: logistic regression (IAF-prox + age) gives p=0.721 for IAF-prox; Mann-Whitney U gives p=0.546. Direction is opposite to Corlier (2019)/Roelofs (2021)'s finding (responders show slightly higher IAF-prox here), though at p=0.72 this reflects noise around a null effect, not a reversed association. Age's coefficient (p=0.052) is consistent with a direct subgroup-level check (Welch's t=-2.00, p=0.055) - the same confound as the full cohort (Decision 7), borderline significant at this smaller n.
-
-Unlike the Bailey supplementary null, this is a non-replication of a previously well-supported finding - Klooster et al. (2024) certify IAF-proximity as one of two robust biomarkers in their review, positively replicated by both Corlier (2019) and Roelofs (2021) before this test.
+Raw data is not included in this repository (see `.gitignore`) and is subject to the terms of the TDBRAIN Data Use Agreement, including restrictions on redistribution and re-identification of subjects.
